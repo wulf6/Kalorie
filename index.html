@@ -106,7 +106,7 @@ body{background:var(--bg);color:var(--text);transition:background .3s,color .3s}
       <textarea id="ai-input" class="inp" rows="3" placeholder='„150g ovesné kaše s banánem", „svíčková s knedlíkem", „jogurt Activia"…' style="margin-bottom:10px;line-height:1.5" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();handleAI()}"></textarea>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
         <label style="font-size:12px;color:var(--muted);white-space:nowrap">Porce (g):</label>
-        <input class="inp" type="number" id="ai-g" value="100" min="1" style="width:80px"/>
+        <input class="inp" type="number" id="ai-g" value="100" min="1" style="width:80px" onchange="" />
       </div>
       <button class="btn-pri" id="ai-btn" onclick="handleAI()">🤖 Analyzovat přes ChatGPT</button>
     </div>
@@ -125,7 +125,7 @@ body{background:var(--bg);color:var(--text);transition:background .3s,color .3s}
         </div>
         <div>
           <label id="m-g-label" style="font-size:11px;font-weight:600;color:var(--muted);display:block;margin-bottom:4px;padding-left:2px">GRAMY (g)</label>
-          <input class="inp" type="number" id="m-g" placeholder="100" value="100" oninput="onManualGrams()"/>
+          <input class="inp" type="number" id="m-g" placeholder="100" value="100" onchange="onManualGrams()" onblur="onManualGrams()"/>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:12px">
@@ -232,7 +232,7 @@ function targets(){
     tuky:      Math.round(cilKcal*0.28/9),
     sacharidy: Math.round(cilKcal*0.42/4),
     vlaknina:  30,
-    voda:      Math.round(p.vaha*35) };
+    voda: p.vodaCil || Math.round(p.vaha*35) };
 }
 function totals(){
   return entries.reduce((a,e)=>({
@@ -399,19 +399,26 @@ function render(){
     // Základní
     if(profTab==="zakladni"){
       html += `<div class="card" style="padding:20px;display:flex;flex-direction:column;gap:14px">
-        ${["vaha|Hmotnost (kg)|30|300","vyska|Výška (cm)|100|250","vek|Věk|10|100"].map(f=>{
-          const [key,label,min,max] = f.split("|");
-          return `<div>
-            <label style="font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:5px">${label}</label>
-            <input class="inp" type="number" min="${min}" max="${max}" value="${profile[key]}" oninput="updProf('${key}',+this.value)"/>
-          </div>`;
-        }).join("")}
         <div>
           <label style="font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:8px">Pohlaví</label>
           <div style="display:flex;gap:10px">
             <button class="gender-btn${profile.pohlavi==="muz"?" active":""}" onclick="updProf('pohlavi','muz')">👨 Muž</button>
             <button class="gender-btn${profile.pohlavi==="zena"?" active":""}" onclick="updProf('pohlavi','zena')">👩 Žena</button>
           </div>
+        </div>
+        ${[["vyska","Výška (cm)",100,250,1],["vaha","Hmotnost (kg)",30,300,0.5],["cilVaha","Cílová hmotnost (kg)",30,300,0.5],["vek","Věk",10,100,1]].map(([key,label,min,max,step])=>`
+          <div>
+            <label style="font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:5px">${label}</label>
+            <input class="inp" type="number" min="${min}" max="${max}" step="${step}" value="${profile[key]||""}"
+              onblur="if(this.value)updProf('${key}',+this.value)"
+              onkeydown="if(event.key==='Enter'){this.blur();}"/>
+          </div>`).join("")}
+        <div>
+          <label style="font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:6px">Pitný režim (ml/den)</label>
+          <input class="inp" type="number" min="500" max="6000" step="100" value="${profile.vodaCil||Math.round((profile.vaha||80)*35)}"
+            onblur="if(this.value)updProf('vodaCil',+this.value)"
+            onkeydown="if(event.key==='Enter'){this.blur();}"/>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">Doporučeno: ${Math.round((profile.vaha||80)*35)} ml (35ml × kg váhy)</div>
         </div>
         <div>
           <label style="font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:6px">Úroveň aktivity</label>
@@ -439,12 +446,10 @@ function render(){
     // Hubnutí
     if(profTab==="hubnuti"){
       html += `<div class="card" style="padding:20px;display:flex;flex-direction:column;gap:16px">
-        <div>
-          <label style="font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:6px">Cílová váha (kg)</label>
-          <div style="display:flex;gap:12px;align-items:center">
-            <input class="inp" type="number" min="30" max="${profile.vaha}" step="0.5" value="${profile.cilVaha||profile.vaha}" oninput="updProf('cilVaha',+this.value)" style="width:100px"/>
-            <div style="font-size:13px;color:var(--muted)">${profile.vaha} kg → <b style="color:var(--text)">${profile.cilVaha||profile.vaha} kg</b><br><span style="font-size:12px">zhubnout ${Math.max(0,(profile.vaha-(profile.cilVaha||profile.vaha)).toFixed(1))} kg</span></div>
-          </div>
+        <div style="padding:12px;background:var(--surface);border-radius:10px;border:1px solid var(--border);font-size:13px;color:var(--muted)">
+          Cílovou hmotnost nastav v záložce <b>👤 Základní</b>.
+          <br>Aktuálně: <b style="color:var(--text)">${profile.vaha} kg → ${profile.cilVaha||profile.vaha} kg</b>
+          (zhubnout <b>${Math.max(0,((profile.vaha||0)-(profile.cilVaha||profile.vaha||0)).toFixed(1))} kg</b>)
         </div>
         <div>
           <label style="font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:8px">Tempo hubnutí</label>
