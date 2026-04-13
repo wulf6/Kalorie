@@ -3,7 +3,12 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
-<meta name="theme-color" content="#f1f5f9"/>
+<meta name="theme-color" content="#6366f1"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+<meta name="apple-mobile-web-app-title" content="Kalorie AI"/>
+<link rel="manifest" href="manifest.json"/>
 <title>Kalorie AI</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -103,7 +108,7 @@ body{background:var(--bg);color:var(--text);transition:background .3s,color .3s}
         <label style="font-size:12px;color:var(--muted);white-space:nowrap">Porce (g):</label>
         <input class="inp" type="number" id="ai-g" value="100" min="1" style="width:80px"/>
       </div>
-      <button class="btn-pri" id="ai-btn" onclick="handleAI()">🤖 Analyzovat přes Gemini</button>
+      <button class="btn-pri" id="ai-btn" onclick="handleAI()">🤖 Analyzovat přes ChatGPT</button>
     </div>
 
     <!-- Manual -->
@@ -467,26 +472,20 @@ function render(){
     // API klíč
     if(profTab==="api"){
       html += `<div class="card" style="padding:20px;display:flex;flex-direction:column;gap:14px">
-        <div style="font-size:13px;color:var(--muted);line-height:1.6">
-          🤖 <b>Gemini API</b> se používá pro AI analýzu jídel.<br>
-          📷 <b>Skenování čárových kódů</b> funguje zdarma bez klíče přes Open Food Facts.<br>
-          ✏️ <b>Ruční zadání</b> nepotřebuje žádný klíč.
+        <div style="font-size:13px;color:var(--muted);line-height:1.7">
+          🤖 <b>OpenAI API (ChatGPT)</b> se používá pro AI analýzu jídel.<br>
+          📷 <b>Skenování čárových kódů</b> funguje zdarma bez klíče.<br>
+          ✏️ <b>Ruční zadání + databáze</b> nepotřebuje žádný klíč.
         </div>
         <div>
-          <label style="font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:6px">Gemini API klíč</label>
-          <input class="inp" type="password" id="gemini-key-inp" value="${profile.geminiKey||""}" placeholder="AIza..." oninput="updProf('geminiKey',this.value)"/>
-          <div style="font-size:11px;color:var(--muted);margin-top:6px">Získáš zdarma na <b>aistudio.google.com/apikey</b></div>
+          <label style="font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:6px">OpenAI API klíč</label>
+          <input class="inp" type="password" id="openai-key-inp" value="${profile.geminiKey||""}" placeholder="sk-..." oninput="updProf('geminiKey',this.value)"/>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px">Získáš na <b>platform.openai.com/api-keys</b> · cca $0.002 / dotaz</div>
         </div>
-        <div style="padding:12px;background:var(--surface);border-radius:10px;border:1px solid var(--border);font-size:12px;color:var(--muted)">
-          Klíč se ukládá pouze do localStorage. Nikam se neodesílá.
-        </div>
-        <div style="padding:12px;background:#fef9ec;border:1px solid #fde68a;border-radius:10px;font-size:12px;color:#92400e;line-height:1.7">
-          ⚠️ <b>Pokud Gemini nefunguje (Failed to fetch):</b><br>
-          Soubor musí běžet přes lokální server, ne přímo z disku.<br><br>
-          <b>Windows:</b> nainstaluj Python, pak v terminálu:<br>
-          <code style="background:rgba(0,0,0,.08);padding:2px 6px;border-radius:4px">python -m http.server 8080</code><br>
-          a otevři <code style="background:rgba(0,0,0,.08);padding:2px 6px;border-radius:4px">http://localhost:8080/kalorie_ai.html</code><br><br>
-          <b>Mac:</b> <code style="background:rgba(0,0,0,.08);padding:2px 6px;border-radius:4px">python3 -m http.server 8080</code>
+        <div style="padding:12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;font-size:12px;color:#166534;line-height:1.6">
+          ✓ OpenAI API funguje přímo z prohlížeče bez dalšího nastavení.<br>
+          ✓ Klíč se ukládá pouze v prohlížeči, nikam se neodesílá.<br>
+          ✓ Za $5 kredit máš tisíce dotazů (stačí na měsíce).
         </div>
       </div>`;
     }
@@ -619,11 +618,18 @@ async function handleAI(){
 
   try{
     const g = parseFloat(document.getElementById("ai-g").value)||100;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`;
-    const res = await fetch(url,{
+    const res = await fetch("https://api.openai.com/v1/chat/completions",{
       method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({contents:[{parts:[{text:GEMINI_PROMPT+"\n\nJídlo/porce: "+txt+(g!==100?" (porce "+g+"g)":"")}]}]})
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},
+      body:JSON.stringify({
+        model:"gpt-4o-mini",
+        max_tokens:200,
+        temperature:0.2,
+        messages:[
+          {role:"system",content:GEMINI_PROMPT},
+          {role:"user",content:"Jídlo/porce: "+txt+(g!==100?" (porce "+g+"g)":"")}
+        ]
+      })
     });
     if(!res.ok){
       const errData = await res.json().catch(()=>({}));
@@ -631,7 +637,7 @@ async function handleAI(){
       throw new Error(errMsg);
     }
     const d = await res.json();
-    const raw = (d.candidates?.[0]?.content?.parts?.[0]?.text||"").replace(/```json|```/g,"").trim();
+    const raw = (d.choices?.[0]?.message?.content||"").replace(/```json|```/g,"").trim();
     if(!raw) throw new Error("Prázdná odpověď od AI");
     const parsed = JSON.parse(raw);
     if(!parsed.jidlo||typeof parsed.kcal!=="number") throw new Error("Neplatná data z AI");
@@ -641,15 +647,17 @@ async function handleAI(){
     setTimeout(closeAdd,1200);
   }catch(e){
     if(e.message.includes("Failed to fetch")){
-      showErr("Chyba připojení. Zkontroluj: 1) připojení k internetu 2) API klíč v Profilu 3) otevři soubor přes lokální server místo file://");
-    } else if(e.message.includes("API_KEY")||e.message.includes("401")){
-      showErr("Neplatný API klíč. Zkontroluj klíč v Profilu → API klíč.");
+      showErr("Chyba připojení k OpenAI. Zkontroluj připojení k internetu.");
+    } else if(e.message.includes("401")||e.message.includes("Incorrect API key")){
+      showErr("Neplatný OpenAI klíč. Zkontroluj klíč v Profilu → API klíč (začíná sk-...).");
+    } else if(e.message.includes("quota")||e.message.includes("429")){
+      showErr("Vyčerpán kredit OpenAI. Dobij účet na platform.openai.com/billing");
     } else {
       showErr("Chyba: "+e.message);
     }
     console.error(e);
   }
-  btn.disabled=false; btn.innerHTML="🤖 Analyzovat přes Gemini";
+  btn.disabled=false; btn.innerHTML="🤖 Analyzovat přes ChatGPT";
 }
 
 // ── Manual autocomplete ──────────────────────────────────────────────────────
@@ -833,6 +841,11 @@ function startQuagga(){
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 render();
+</script>
+<script>
+if("serviceWorker" in navigator){
+  navigator.serviceWorker.register("sw.js").catch(()=>{});
+}
 </script>
 </body>
 </html>
