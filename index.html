@@ -364,7 +364,8 @@ async function loadFoodDB(){
     const cached = localStorage.getItem("food_db_cache");
     const cacheTime = localStorage.getItem("food_db_cache_time");
     const oneDay = 24*60*60*1000;
-    if(cached && cacheTime && (Date.now()-parseInt(cacheTime)) < oneDay){
+    const cacheVer = localStorage.getItem("food_db_cache_ver");
+    if(cached && cacheTime && cacheVer === "2" && (Date.now()-parseInt(cacheTime)) < oneDay){
       Object.assign(FOOD_DB, JSON.parse(cached));
       return;
     }
@@ -377,6 +378,7 @@ async function loadFoodDB(){
       try {
         localStorage.setItem("food_db_cache", JSON.stringify(data));
         localStorage.setItem("food_db_cache_time", Date.now().toString());
+        localStorage.setItem("food_db_cache_ver", "2");
       } catch(_){}
       return;
     }
@@ -409,7 +411,11 @@ function normKey(s){
 }
 function lookupLocal(q){
   const k = normKey(q);
+  if(!k) return null;
   if(FOOD_DB[k]) return FOOD_DB[k];
+  // Přesná shoda na začátku (priorita)
+  const startMatch = Object.entries(FOOD_DB).find(([key]) => key.startsWith(k));
+  if(startMatch) return startMatch[1];
   // Částečná shoda
   const found = Object.entries(FOOD_DB).find(([key]) => key.includes(k));
   return found ? found[1] : null;
@@ -584,17 +590,31 @@ function render(){
       <!-- Kcal progress -->
       <div class="card" style="padding:16px;margin-bottom:12px">
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
-          <span style="color:#6366f1;font-weight:700">Kalorie</span>
+          <span style="color:#6366f1;font-weight:700">Kalorie (příjem)</span>
           <span style="color:var(--muted);font-size:13px">${Math.round(T.kcal)} / ${kcalLimit} kcal</span>
         </div>
         <div class="prog-bar"><div class="prog-fill" style="width:${kcalPct}%;background:${kcalPct>100?"#ef4444":"linear-gradient(90deg,#6366f1,#8b5cf6)"}"></div></div>
         <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px;color:var(--muted)">
-          <span>${tg.hubnuti?"🎯 Cíl hubnutí: "+kcalLimit+" kcal":"Udržovací: "+kcalLimit+" kcal"}${actBurnToday>0?" · 🏃 −"+actBurnToday+" kcal":""}</span>
+          <span>${tg.hubnuti?"🎯 Cíl hubnutí: "+kcalLimit+" kcal":"Udržovací: "+kcalLimit+" kcal"}</span>
           <span style="color:${T.kcal>kcalLimit?"#ef4444":"#22c55e"};font-weight:600">${T.kcal>kcalLimit?"⚠️ Přesaženo o "+Math.round(T.kcal-kcalLimit)+" kcal":Math.round(kcalLimit-T.kcal)+" zbývá"}</span>
         </div>
         ${tg.hubnuti?`<div style="margin-top:6px;padding:6px 10px;background:rgba(245,158,11,.08);border-radius:8px;font-size:11px;color:#92400e;display:flex;justify-content:space-between">
           <span>Udržovací TDEE: ${tg.tdee} kcal</span>
           <span>Deficit: −${tg.deficit} kcal/den</span>
+        </div>`:""}
+
+        ${actBurnToday>0?`
+        <!-- Výdej aktivit -->
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+            <span style="color:#f97316;font-weight:700">🏃 Výdej (aktivity)</span>
+            <span style="color:var(--muted);font-size:13px">−${actBurnToday} kcal</span>
+          </div>
+          <div class="prog-bar"><div class="prog-fill" style="width:${Math.min(actBurnToday/kcalLimit*100,100)}%;background:linear-gradient(90deg,#f97316,#fb923c)"></div></div>
+          <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px">
+            <span style="color:var(--muted)">Čistý příjem po odečtení výdeje</span>
+            <span style="font-weight:700;color:${(T.kcal-actBurnToday)<kcalLimit?"#22c55e":"#ef4444"}">${Math.round(T.kcal-actBurnToday)} kcal</span>
+          </div>
         </div>`:""}
       </div>
 
@@ -667,34 +687,34 @@ function render(){
       chartDays.push({d, kcal:Math.round(items.reduce((a,e)=>a+(e.kcal||0),0))});
     }
     const maxKcal = Math.max(...chartDays.map(d=>d.kcal), tg.cilKcal, 100);
-    html += `<div style="max-width:900px;margin:0 auto;padding:14px 16px">
-      <div style="font-size:18px;font-weight:800;margin-bottom:12px">📅 Historie jídel</div>
-
-      <!-- 14-day bar chart -->
-      <div class="card" style="padding:16px;margin-bottom:16px">
-        <div style="font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.05em;margin-bottom:12px">KALORIE — POSLEDNÍCH 14 DNÍ</div>
-        <div style="display:flex;align-items:flex-end;gap:3px;height:80px;position:relative">
-          <!-- goal line -->
-          <div style="position:absolute;left:0;right:0;top:\${Math.round((1-tg.cilKcal/maxKcal)*80)}px;border-top:1px dashed #6366f1;z-index:1;pointer-events:none"></div>
-          \${chartDays.map(d=>{
-            const h = d.kcal ? Math.max(Math.round(d.kcal/maxKcal*80),2) : 2;
-            const isToday = d.d===TODAY();
-            const over = d.kcal > tg.cilKcal;
-            const col = d.kcal===0 ? "var(--border)" : over ? "#ef4444" : "#6366f1";
-            const label = d.d.slice(5); // MM-DD
-            return \`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:default" title="\${d.d}: \${d.kcal} kcal">
-              \${d.kcal>0?'<div style="font-size:8px;color:var(--muted);white-space:nowrap">'+(d.kcal>=1000?Math.round(d.kcal/100)/10+'k':d.kcal)+'</div>':'<div style="font-size:8px;color:transparent">0</div>'}
-              <div style="width:100%;height:\${h}px;background:\${col};border-radius:3px 3px 0 0;\${isToday?'outline:2px solid #6366f1;outline-offset:1px':''}"></div>
-              <div style="font-size:8px;color:\${isToday?'#6366f1':'var(--muted)'};font-weight:\${isToday?700:400}">\${label}</div>
-            </div>\`;
-          }).join("")}
-        </div>
-        <div style="display:flex;align-items:center;gap:12px;margin-top:10px;font-size:11px;color:var(--muted)">
-          <span><span style="display:inline-block;width:10px;height:3px;background:#6366f1;border-radius:1px;vertical-align:middle"></span> V cíli</span>
-          <span><span style="display:inline-block;width:10px;height:3px;background:#ef4444;border-radius:1px;vertical-align:middle"></span> Přes cíl</span>
-          <span style="margin-left:auto">--- Cíl: \${tg.cilKcal} kcal</span>
-        </div>
-      </div>`;
+    const goalLineTop = Math.round((1 - tg.cilKcal/maxKcal)*80);
+    const chartBars = chartDays.map(d=>{
+      const h = d.kcal ? Math.max(Math.round(d.kcal/maxKcal*80),2) : 2;
+      const isToday = d.d===TODAY();
+      const over = d.kcal > tg.cilKcal;
+      const col = d.kcal===0 ? "var(--border)" : over ? "#ef4444" : "#6366f1";
+      const label = d.d.slice(5);
+      const valLabel = d.kcal>0 ? '<div style="font-size:8px;color:var(--muted);white-space:nowrap">'+(d.kcal>=1000?Math.round(d.kcal/100)/10+'k':d.kcal)+'</div>' : '<div style="font-size:8px;color:transparent">0</div>';
+      const outline = isToday ? 'outline:2px solid #6366f1;outline-offset:1px;' : '';
+      const labelCol = isToday ? '#6366f1' : 'var(--muted)';
+      const labelW = isToday ? 700 : 400;
+      return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:default" title="'+d.d+': '+d.kcal+' kcal">'+
+        valLabel+
+        '<div style="width:100%;height:'+h+'px;background:'+col+';border-radius:3px 3px 0 0;'+outline+'"></div>'+
+        '<div style="font-size:8px;color:'+labelCol+';font-weight:'+labelW+'">'+label+'</div>'+
+      '</div>';
+    }).join("");
+    html += '<div style="max-width:900px;margin:0 auto;padding:14px 16px">'+
+      '<div style="font-size:18px;font-weight:800;margin-bottom:12px">📅 Historie jídel</div>'+
+      '<div class="card" style="padding:16px;margin-bottom:16px">'+
+        '<div style="font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.05em;margin-bottom:12px">KALORIE — POSLEDNÍCH 14 DNÍ</div>'+
+        '<div style="display:flex;align-items:flex-end;gap:3px;height:80px;position:relative">'+
+          '<div style="position:absolute;left:0;right:0;top:'+goalLineTop+'px;border-top:1px dashed #6366f1;z-index:1;pointer-events:none"></div>'+
+          chartBars+
+        '</div>'+
+        '<div style="display:flex;align-items:center;gap:12px;margin-top:10px;font-size:11px;color:var(--muted)">'+
+        '</div>'+
+      '</div>';
     if(!days.length){
       html += `<div class="card" style="padding:40px;text-align:center;color:var(--muted)">Zatím žádná historie.<br>Data se uloží po resetu dne.</div>`;
     } else {
@@ -1842,7 +1862,10 @@ function onManualInput(){
   document.getElementById("m-autofill-info").style.display="none";
   checkLiquidMode(inp.value);
   if(q.length < 2){ hideGlobalSuggest(); _manualMatches=[]; return; }
-  _manualMatches = Object.entries(FOOD_DB).filter(([k])=>k.includes(q)).slice(0,8).map(([,e])=>e);
+  // Nejdřív shody na začátku, pak ostatní
+  const startsWith = Object.entries(FOOD_DB).filter(([k])=>k.startsWith(q)).slice(0,5).map(([,e])=>e);
+  const contains = Object.entries(FOOD_DB).filter(([k])=>!k.startsWith(q)&&k.includes(q)).slice(0,5).map(([,e])=>e);
+  _manualMatches = [...startsWith, ...contains].slice(0,8);
   showGlobalSuggest(inp, _manualMatches, (entry) => selectManualSug(entry));
 }
 
