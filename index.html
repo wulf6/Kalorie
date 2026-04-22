@@ -2,7 +2,7 @@
 <html lang="cs">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <meta name="theme-color" id="theme-meta" content="#6366f1"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -29,9 +29,7 @@ input[type=number]::-webkit-inner-spin-button{opacity:1}
   --fab-bottom:24px;
   --top-safe:env(safe-area-inset-top,0px);
   --bot-safe:env(safe-area-inset-bottom,0px);
-  --fs:1rem;
 }
-html{ font-size:1rem; }
 /* Status bar kompenzace ve standalone PWA */
 @media all and (display-mode: standalone){
   body{ padding-top:var(--top-safe); }
@@ -130,6 +128,8 @@ body{background:var(--bg);color:var(--text);transition:background .3s,color .3s}
 /* Safe area pro notch a home indicator */
 .fab{padding-bottom:0;bottom:max(var(--fab-bottom),calc(env(safe-area-inset-bottom) + 16px));right:max(20px,calc(env(safe-area-inset-right) + 16px))}
 input:focus,textarea:focus{scroll-margin-bottom:120px}
+.macro-detail-modal{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:400;display:flex;align-items:center;justify-content:center;padding:20px}
+.macro-detail-card{background:var(--card);border-radius:24px;max-width:500px;width:100%;max-height:80vh;overflow-y:auto;padding:20px;border:1px solid var(--border)}
 </style>
 </head>
 <body>
@@ -142,9 +142,20 @@ input:focus,textarea:focus{scroll-margin-bottom:120px}
 <div id="app"></div>
 
 <!-- ── SCANNER ── -->
+<div id="macro-detail-modal" style="display:none" class="macro-detail-modal" onclick="closeMacroDetail()">
+  <div class="macro-detail-card" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <span id="macro-detail-title" style="font-size:18px;font-weight:800"></span>
+      <button onclick="closeMacroDetail()" style="background:var(--surface);border:none;border-radius:8px;padding:4px 12px;font-size:18px;cursor:pointer;color:var(--muted)">×</button>
+    </div>
+    <div id="macro-detail-list" style="max-height:55vh;overflow-y:auto"></div>
+    <div id="macro-detail-total" style="margin-top:14px;padding-top:12px;border-top:2px solid var(--border);font-weight:700;text-align:right;font-size:15px"></div>
+  </div>
+</div>
+
 <div id="scanner" style="display:none;position:fixed;inset:0;z-index:500;background:#000;flex-direction:column">
   <div style="position:relative;flex:1;overflow:hidden">
-    <video id="scan-vid" muted playsinline autoplay style="width:100%;height:100%;object-fit:cover;background:#000"></video>
+    <video id="scan-vid" muted playsinline style="width:100%;height:100%;object-fit:cover"></video>
     <canvas id="scan-canvas" style="display:none"></canvas>
     <div style="position:absolute;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;pointer-events:none">
       <div style="position:relative;width:280px;height:150px;box-shadow:0 0 0 9999px rgba(0,0,0,.5);border-radius:12px">
@@ -157,8 +168,10 @@ input:focus,textarea:focus{scroll-margin-bottom:120px}
     </div>
     <div id="scan-status" style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.85));padding:28px 20px 16px;text-align:center;font-size:14px;font-weight:600;color:#fff">Načítám kameru…</div>
   </div>
-  <div style="background:#0a0f1e;padding:12px 20px 28px">
-    <button onclick="closeScanner()" style="width:100%;padding:14px;background:#1e293b;border:1px solid #334155;border-radius:14px;color:#94a3b8;font-size:15px;cursor:pointer">✕ Zavřít kameru</button>
+  <div style="background:#0a0f1e;padding:12px 20px 28px;display:flex;flex-direction:column;gap:10px">
+    <button id="scan-fallback-btn" onclick="document.getElementById('scan-file-inp').click()" style="width:100%;padding:14px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border:none;border-radius:14px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;display:none">📸 Vyfotit čárový kód</button>
+    <input type="file" id="scan-file-inp" accept="image/*" capture="environment" style="display:none" onchange="handleScanFile(this)"/>
+    <button onclick="closeScanner()" style="width:100%;padding:14px;background:#1e293b;border:1px solid #334155;border-radius:14px;color:#94a3b8;font-size:15px;cursor:pointer">✕ Zavřít</button>
   </div>
 </div>
 
@@ -174,7 +187,7 @@ input:focus,textarea:focus{scroll-margin-bottom:120px}
 </div>
 
 <!-- ── ADD SHEET ── -->
-<div id="add-sheet" style="display:none" class="modal-overlay" onclick="closeAdd()">
+<div id="add-sheet" style="display:none" class="modal-overlay" onclick="if(event.target===this)closeAdd()">
   <div class="sheet" onclick="event.stopPropagation()">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0">
       <div style="font-size:16px;font-weight:700;color:var(--text)">Přidat jídlo</div>
@@ -204,7 +217,8 @@ input:focus,textarea:focus{scroll-margin-bottom:120px}
           <div style="font-size:11px;color:var(--muted);margin-top:2px">AI odhadne kalorie z fotky</div>
         </div>
       </div>
-      <textarea id="ai-input" class="inp" rows="2" placeholder='nebo popiš: „150g ovesné kaše s banánem"…' style="margin-bottom:10px;line-height:1.5" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();handleAI()}"></textarea>
+      <textarea id="ai-input" class="inp" rows="2" placeholder='nebo popiš: „150g ovesné kaše s banánem"…' style="margin-bottom:10px;line-height:1.5" oninput="onAiInput()" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();handleAI()}"></textarea>
+      <div id="ai-suggest" style="display:none;position:absolute;left:0;right:0;top:100%;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:999;max-height:180px;overflow-y:auto;margin-top:3px"></div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
         <label style="font-size:12px;color:var(--muted);white-space:nowrap">Porce (g):</label>
         <input class="inp" type="number" id="ai-g" value="100" min="1" style="width:80px" onchange="" />
@@ -288,7 +302,7 @@ input:focus,textarea:focus{scroll-margin-bottom:120px}
           <div style="font-size:11px;color:var(--muted);font-weight:600;margin-bottom:8px">PŘIDAT SUROVINU</div>
           <input id="editor-ing-name" class="inp" placeholder="Název suroviny…" oninput="onEditorIngInput()" onkeydown="onEditorIngKey(event)" autocomplete="off" style="margin-bottom:8px"/>
           <!-- suggest jako fixed overlay -->
-          <div id="editor-ing-suggest" style="display:none;position:fixed;left:16px;right:16px;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.3);z-index:9999;max-height:200px;overflow-y:auto"></div>
+          <div id="editor-ing-suggest" style="display:none;position:fixed;left:16px;right:16px;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.3);z-index:9999;max-height:200px;overflow-y:auto" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"></div>
           <div style="display:flex;gap:8px">
             <input id="editor-ing-g" class="inp" type="number" value="100" min="1" style="flex:1"/>
             <span style="display:flex;align-items:center;color:var(--muted);font-size:13px;flex-shrink:0">g/ml</span>
@@ -318,35 +332,67 @@ input:focus,textarea:focus{scroll-margin-bottom:120px}
 // ── Config & State ────────────────────────────────────────────────────────────
 const FOOD_DB = {}; // Načítá se z db.json
 
+// Typické gramáže potravin
+const TYPICAL_G = {
+  "rohlik":43,"rohlík":43,"houska":50,"chleb":50,"chléb":50,"bageta":60,"toust":30,"toast":30,"kaiserka":50,"croissant":50,"donut":60,"perník":50,"loupak":60,"loupák":60,"žemle":50,"bulka":50,"veka":50,"dalamánek":50,"preclík":50,"bagel":80,"pizza":150,"tortilla":50,"wrap":100,"pita":80,"knedlik":120,"knedlík":120,"houskový knedlík":120,"bramborový knedlík":120,"bramborák":100,"lokše":100,
+  "sunka":20,"šunka":20,"salám":30,"párek":50,"klobása":70,"kureci prsa":150,"kuřecí prsa":150,"kureci prso":150,"kureci rizek":150,"veprova":150,"vepřová":150,"hovězí":150,"losos":150,"treska":150,"tuňák":150,"sardinka":80,"ryba":150,"kure":150,"kachna":150,"vejce":55,"vajíčko":55,"vajicko":55,"slanina":20,"párek v rohlíku":150,"hot dog":150,"burger":200,"hamburger":200,"cheeseburger":200,"kebab":250,"gyros":250,"špekáček":80,"buřt":80,"jitrnice":100,"tlačenka":80,
+  "mleko":250,"mléko":250,"jogurt":150,"tvaroh":150,"cottage":150,"syr":30,"sýr":30,"eidam":30,"gouda":30,"ricotta":100,"mascarpone":50,"smetana":30,"kefír":250,"hermelín":50,"niva":30,"mozzarella":100,"parmazán":20,"tavený sýr":30,"skyr":150,"activia":150,"actimel":100,"ayran":250,"žervé":30,"lučina":30,"pomazánkové máslo":20,
+  "banan":118,"banán":118,"jablko":150,"pomeranc":200,"pomeranč":200,"mandarinka":80,"hruška":150,"jahoda":100,"jahody":100,"borůvky":100,"maliny":100,"kiwi":100,"mango":150,"ananas":100,"melon":200,"hrozny":150,"broskev":120,"meruňka":80,"švestka":80,"grep":150,"citron":50,"avokado":100,"avokádo":100,"papája":150,"fíky":80,"datle":30,"rozinky":20,
+  "mrkev":80,"okurka":100,"rajče":100,"rajčata":100,"paprika":100,"brambory":200,"brambor":200,"cibule":50,"cesnek":10,"česnek":10,"salát":50,"spenat":100,"špenát":100,"brokolice":100,"květák":100,"cuketa":100,"dýně":100,"ředkev":50,"celer":50,"lilek":100,"batát":150,"kysané zelí":100,"fazole":100,"hrášek":100,"kukuřice":100,
+  "ryze":150,"rýže":150,"testoviny":150,"těstoviny":150,"bramborova kase":150,"bramborová kaše":150,"ovesne vlocky":60,"ovesné vločky":60,"cerealie":50,"müsli":50,"granola":50,"kuskus":150,"bulgur":150,"quinoa":150,"pohanka":150,"jáhly":150,"cizrna":150,"cocka":150,"čočka":150,"tofu":100,
+  "voda":250,"kava":200,"káva":200,"caj":250,"čaj":250,"pivo":500,"vino":150,"víno":150,"cola":330,"dzus":250,"džus":250,"smoothie":300,"mineralka":250,"limonáda":330,"energetický nápoj":250,"kakao":250,"espresso":30,"cappuccino":200,"latte":200,"prosecco":150,"sekt":150,"aperol":200,"destilát":50,"rum":50,"vodka":50,"whisky":50,
+  "maslo":10,"máslo":10,"olej":10,"majoneza":15,"majonéza":15,"kečup":20,"horcice":10,"hořčice":10,"tatarka":30,"dresink":30,"pesto":30,"guacamole":50,"hummus":50,"pomazánka":50,"paštika":50,"nutella":20,"arašídové máslo":20,"džem":20,"marmeláda":20,"med":15,"javorový sirup":15,"cukr":10,"sádlo":10,
+  "cokolada":40,"čokoláda":40,"orechy":30,"ořechy":30,"mandle":30,"kešu":30,"arasidy":30,"chia":20,"semínka":20,"protein":30,"whey":30,"proteinová tyčinka":40,"tyčinka":40,"brownie":50,"muffin":60,"dort":100,"zákusek":100,"kobliha":70,"sušenka":20,"cookies":20,"keks":20,"zmrzlina":100,"puding":150,"kase":200,"kaše":200,"polevka":300,"polévka":300,"vývar":300,"hranolky":150,"brambůrky":30,"chipsy":30,"popcorn":30,"preclíky":30,"krekry":30
+};
+
+function getTypicalGrams(name){
+  if(!name) return 100;
+  const normalized = name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+  let bestMatch = null, bestLength = 0;
+  for(let key in TYPICAL_G){
+    if(normalized.includes(key) && key.length > bestLength){
+      bestLength = key.length;
+      bestMatch = TYPICAL_G[key];
+    }
+  }
+  return bestMatch !== null ? bestMatch : 100;
+}
+
 // Načtení databáze potravin
 async function loadFoodDB(){
-  // 1. Zkus localStorage cache
   try {
     const cached = localStorage.getItem("food_db_cache");
-    const ver = localStorage.getItem("food_db_ver");
-    if(cached && ver === "1"){
-      const parsed = JSON.parse(cached);
-      Object.assign(FOOD_DB, parsed);
-      console.log("DB načtena z cache:", Object.keys(FOOD_DB).length, "položek");
+    const cacheTime = localStorage.getItem("food_db_cache_time");
+    const oneDay = 24*60*60*1000;
+    if(cached && cacheTime && (Date.now()-parseInt(cacheTime)) < oneDay){
+      Object.assign(FOOD_DB, JSON.parse(cached));
       return;
     }
   } catch(_){}
-
-  // 2. Načti z db.json
   try {
-    const r = await fetch("db.json");
-    if(!r.ok) throw new Error("HTTP "+r.status);
-    const data = await r.json();
-    Object.assign(FOOD_DB, data);
-    // Ulož do cache
-    try {
-      localStorage.setItem("food_db_cache", JSON.stringify(data));
-      localStorage.setItem("food_db_ver", "1");
-    } catch(_){}
-    console.log("DB načtena ze souboru:", Object.keys(FOOD_DB).length, "položek");
-  } catch(e) {
-    console.warn("Nepodařilo se načíst db.json:", e.message);
+    const r = await fetch("db.json?t="+Date.now());
+    if(r.ok){
+      const data = await r.json();
+      Object.assign(FOOD_DB, data);
+      try {
+        localStorage.setItem("food_db_cache", JSON.stringify(data));
+        localStorage.setItem("food_db_cache_time", Date.now().toString());
+      } catch(_){}
+      return;
+    }
+  } catch(e){
+    console.warn("Nelze načíst db.json:", e.message);
   }
+  // Základní fallback DB
+  Object.assign(FOOD_DB, {
+    "banan":["Banán",94,1.2,22,0.2,2],"jablko":["Jablko",62,0.4,13,0.4,3],
+    "mrkev":["Mrkev",42,1,7,0.2,3],"brambory":["Brambory vařené",84,1.7,18,0.1,1],
+    "vejce":["Vejce",151,12,1,11,0],"kureci prsa":["Kuřecí prsa",106,23,0,1.5,0],
+    "rohlik":["Rohlík bílý",310,9.8,57,3.7,4],"chleb":["Chléb kmínový",244,8,45,1,4],
+    "sunka":["Šunka",118,19,0.5,4.5,0],"mleko":["Mléko",46,3.3,4.7,1.5,0],
+    "jogurt":["Jogurt bílý",71,4.3,4.5,3.4,0],"syr":["Sýr Eidam",323,30,0,22,0],
+    "ryze":["Rýže vařená",131,2.7,29,0.3,0],"testoviny":["Těstoviny vařené",154,5,29,1,2]
+  });
 }
 
 const SLOTS = ["Snídaně","Svačina","Oběd","Svačina 2","Večeře"];
@@ -532,6 +578,7 @@ function render(){
 
   // ── TAB DNES ──
   if(tab==="dnes"){
+    const actBurnToday = Math.round((ls("act_log",[])).filter(a=>a.d===TODAY()).reduce((s,e)=>s+(e.kcal||0),0));
     html += `<div style="max-width:900px;margin:0 auto;padding:14px 16px">
 
       <!-- Kcal progress -->
@@ -542,7 +589,7 @@ function render(){
         </div>
         <div class="prog-bar"><div class="prog-fill" style="width:${kcalPct}%;background:${kcalPct>100?"#ef4444":"linear-gradient(90deg,#6366f1,#8b5cf6)"}"></div></div>
         <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px;color:var(--muted)">
-          <span>${tg.hubnuti?"🎯 Cíl hubnutí: "+kcalLimit+" kcal":"Udržovací: "+kcalLimit+" kcal"}${(()=>{const b=Math.round(ls("act_log",[]).filter(a=>a.d===TODAY()).reduce((s,e)=>s+(e.kcal||0),0));return b>0?" · 🏃 −"+b+" kcal":""})()}</span>
+          <span>${tg.hubnuti?"🎯 Cíl hubnutí: "+kcalLimit+" kcal":"Udržovací: "+kcalLimit+" kcal"}${actBurnToday>0?" · 🏃 −"+actBurnToday+" kcal":""}</span>
           <span style="color:${T.kcal>kcalLimit?"#ef4444":"#22c55e"};font-weight:600">${T.kcal>kcalLimit?"⚠️ Přesaženo o "+Math.round(T.kcal-kcalLimit)+" kcal":Math.round(kcalLimit-T.kcal)+" zbývá"}</span>
         </div>
         ${tg.hubnuti?`<div style="margin-top:6px;padding:6px 10px;background:rgba(245,158,11,.08);border-radius:8px;font-size:11px;color:#92400e;display:flex;justify-content:space-between">
@@ -553,10 +600,10 @@ function render(){
 
       <!-- Makro rings -->
       <div class="card" style="padding:16px;margin-bottom:12px;display:flex;justify-content:space-around;flex-wrap:wrap;gap:8px;align-items:flex-start">
-        ${ring(T.b,  tg.protein,   "#3b82f6","Bílkoviny","g")}
-        ${ring(T.s,  tg.sacharidy, "#f59e0b","Sacharidy","g")}
-        ${ring(T.t,  tg.tuky,      "#10b981","Tuky","g")}
-        ${ring(T.vl, tg.vlaknina,  "#8b5cf6","Vláknina","g")}
+        <div onclick="showMacroDetail('Bílkoviny','protein')" style="cursor:pointer">${ring(T.b,tg.protein,"#3b82f6","Bílkoviny","g")}</div>
+        <div onclick="showMacroDetail('Sacharidy','carbs')" style="cursor:pointer">${ring(T.s,tg.sacharidy,"#f59e0b","Sacharidy","g")}</div>
+        <div onclick="showMacroDetail('Tuky','fat')" style="cursor:pointer">${ring(T.t,tg.tuky,"#10b981","Tuky","g")}</div>
+        <div onclick="showMacroDetail('Vláknina','fiber')" style="cursor:pointer">${ring(T.vl,tg.vlaknina,"#8b5cf6","Vláknina","g")}</div>
       </div>
 
       <!-- Voda -->
@@ -575,21 +622,16 @@ function render(){
       ${(()=>{
         const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
         const yd = hist[yesterday]||[];
-        if(!yd.length) return "";
-        // dedupe by jidlo name
+        if(!yd.length) return '';
         const unique = [];
         const seen = new Set();
         yd.forEach(e=>{ if(!seen.has(e.jidlo)){seen.add(e.jidlo);unique.push(e);} });
-        return `<div class="card" style="padding:14px;margin-bottom:12px">
-          <div style="font-weight:700;font-size:12px;color:var(--muted);letter-spacing:.05em;margin-bottom:10px">🔁 VČERA — PŘIDAT ZNOVU</div>
-          <div style="display:flex;flex-wrap:wrap;gap:6px">
-            ${unique.slice(0,8).map(e=>`
-              <button onclick="repeatEntry(this)" data-e="${encodeURIComponent(JSON.stringify({jidlo:e.jidlo,porce_g:e.porce_g,kcal:e.kcal||0,b:e.b||0,s:e.s||0,t:e.t||0,vl:e.vl||0,isWater:e.isWater?1:0,source:e.source||'manual',slozky:e.slozky||null}))}"
-                style="padding:6px 11px;background:var(--surface);border:1px solid var(--border);border-radius:20px;font-size:12px;cursor:pointer;color:var(--text);white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis">
-                ${e.jidlo} <span style="color:var(--muted)">${Math.round(e.kcal||0)}</span>
-              </button>`).join("")}
-          </div>
-        </div>`;
+        window._ydItems = unique;
+        const chips = unique.slice(0,8).map((e,i)=>
+          '<button onclick="repeatYesterday('+i+')" style="padding:6px 11px;background:var(--surface);border:1px solid var(--border);border-radius:20px;font-size:12px;cursor:pointer;color:var(--text);white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis">'
+          +e.jidlo+' <span style="color:var(--muted)">'+Math.round(e.kcal||0)+'</span></button>'
+        ).join('');
+        return '<div class="card" style="padding:14px;margin-bottom:12px"><div style="font-weight:700;font-size:12px;color:var(--muted);letter-spacing:.05em;margin-bottom:10px">🔁 VČERA — PŘIDAT ZNOVU</div><div style="display:flex;flex-wrap:wrap;gap:6px">'+chips+'</div></div>';
       })()}
 
       <!-- Jídla podle slotů -->
@@ -633,24 +675,24 @@ function render(){
         <div style="font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.05em;margin-bottom:12px">KALORIE — POSLEDNÍCH 14 DNÍ</div>
         <div style="display:flex;align-items:flex-end;gap:3px;height:80px;position:relative">
           <!-- goal line -->
-          <div style="position:absolute;left:0;right:0;top:${Math.round((1-tg.cilKcal/maxKcal)*80)}px;border-top:1px dashed #6366f1;z-index:1;pointer-events:none"></div>
-          ${chartDays.map(d=>{
+          <div style="position:absolute;left:0;right:0;top:\${Math.round((1-tg.cilKcal/maxKcal)*80)}px;border-top:1px dashed #6366f1;z-index:1;pointer-events:none"></div>
+          \${chartDays.map(d=>{
             const h = d.kcal ? Math.max(Math.round(d.kcal/maxKcal*80),2) : 2;
             const isToday = d.d===TODAY();
             const over = d.kcal > tg.cilKcal;
             const col = d.kcal===0 ? "var(--border)" : over ? "#ef4444" : "#6366f1";
             const label = d.d.slice(5); // MM-DD
-            return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:default" title="${d.d}: ${d.kcal} kcal">
-              ${d.kcal>0?'<div style="font-size:8px;color:var(--muted);white-space:nowrap">'+(d.kcal>=1000?Math.round(d.kcal/100)/10+'k':d.kcal)+'</div>':'<div style="font-size:8px;color:transparent">0</div>'}
-              <div style="width:100%;height:${h}px;background:${col};border-radius:3px 3px 0 0;${isToday?'outline:2px solid #6366f1;outline-offset:1px':''}"></div>
-              <div style="font-size:8px;color:${isToday?'#6366f1':'var(--muted)'};font-weight:${isToday?700:400}">${label}</div>
-            </div>`;
+            return \`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:default" title="\${d.d}: \${d.kcal} kcal">
+              \${d.kcal>0?'<div style="font-size:8px;color:var(--muted);white-space:nowrap">'+(d.kcal>=1000?Math.round(d.kcal/100)/10+'k':d.kcal)+'</div>':'<div style="font-size:8px;color:transparent">0</div>'}
+              <div style="width:100%;height:\${h}px;background:\${col};border-radius:3px 3px 0 0;\${isToday?'outline:2px solid #6366f1;outline-offset:1px':''}"></div>
+              <div style="font-size:8px;color:\${isToday?'#6366f1':'var(--muted)'};font-weight:\${isToday?700:400}">\${label}</div>
+            </div>\`;
           }).join("")}
         </div>
         <div style="display:flex;align-items:center;gap:12px;margin-top:10px;font-size:11px;color:var(--muted)">
           <span><span style="display:inline-block;width:10px;height:3px;background:#6366f1;border-radius:1px;vertical-align:middle"></span> V cíli</span>
           <span><span style="display:inline-block;width:10px;height:3px;background:#ef4444;border-radius:1px;vertical-align:middle"></span> Přes cíl</span>
-          <span style="margin-left:auto">--- Cíl: ${tg.cilKcal} kcal</span>
+          <span style="margin-left:auto">--- Cíl: \${tg.cilKcal} kcal</span>
         </div>
       </div>`;
     if(!days.length){
@@ -822,18 +864,6 @@ function render(){
           </div>
         </div>
 
-        <!-- Velikost písma -->
-        <div>
-          <label style="font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:8px">Velikost písma</label>
-          <div style="display:flex;gap:8px">
-            ${[["Malé","0.85rem"],["Normální","1rem"],["Větší","1.12rem"],["Velké","1.25rem"]].map(([l,v])=>`
-              <button onclick="setFontSize('${v}')"
-                style="flex:1;padding:10px 4px;border-radius:10px;border:2px solid ${(profile.fontSize||'1rem')===v?'#6366f1':'var(--border)'};background:${(profile.fontSize||'1rem')===v?'#eff6ff':'var(--surface)'};color:${(profile.fontSize||'1rem')===v?'#6366f1':'var(--muted)'};font-size:${v};cursor:pointer;font-weight:600">
-                ${l}
-              </button>`).join("")}
-          </div>
-        </div>
-
         <div>
           <label style="font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:6px">Úroveň aktivity</label>
           <select class="inp" onchange="updProf('aktivita',+this.value)">
@@ -923,6 +953,7 @@ function render(){
           <div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.6">
             Klíč zdarma na <b>aistudio.google.com/apikey</b><br>
             Ukládá se pouze v tomto prohlížeči, nikam se neodesílá.
+          </div>
         </div>
 
         <!-- Proxy URL -->
@@ -933,9 +964,20 @@ function render(){
             <button onclick="saveProxyUrl()" style="flex:1;padding:11px;background:#0f766e;border:none;border-radius:10px;color:#fff;font-weight:700;font-size:13px;cursor:pointer">💾 Uložit proxy</button>
             ${profile.proxyUrl?`<button onclick="clearProxy()" style="padding:11px 14px;background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;color:#ef4444;font-weight:600;font-size:12px;cursor:pointer">× Smazat</button>`:""}
           </div>
-          ${profile.proxyUrl?`<div style="font-size:11px;color:#16a34a;margin-top:6px">✓ Proxy: ${profile.proxyUrl}</div>`:`<div style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.6">Bez proxy AI nemusí fungovat z github.io.<br>Viz <b>worker.js</b> – nasaď na <b>workers.cloudflare.com</b> zdarma.</div>`}
+          ${profile.proxyUrl
+            ?`<div style="font-size:11px;color:#16a34a;margin-top:6px">✓ ${profile.proxyUrl}</div>`
+            :`<div style="font-size:11px;color:var(--muted);margin-top:6px">Pro AI z GitHub Pages potřebuješ Cloudflare Worker proxy.</div>`}
         </div>
-        <div style="display:none"><!-- spacer
+
+        <!-- Velikost písma -->
+        <div>
+          <label style="font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.05em;display:block;margin-bottom:8px">VELIKOST PÍSMA</label>
+          <div style="display:flex;gap:8px">
+            ${[["Malé","0.85rem"],["Normální","1rem"],["Větší","1.12rem"],["Velké","1.25rem"]].map(([l,v])=>`
+              <button onclick="setFontSize('${v}')"
+                style="flex:1;padding:9px 4px;border-radius:10px;border:2px solid ${(profile.fontSize||'1rem')===v?'#6366f1':'var(--border)'};background:${(profile.fontSize||'1rem')===v?'#eff6ff':'var(--surface)'};color:${(profile.fontSize||'1rem')===v?'#6366f1':'var(--muted)'};font-size:${v};cursor:pointer;font-weight:600">
+                ${l}
+              </button>`).join("")}
           </div>
         </div>
       </div>`;
@@ -1065,8 +1107,8 @@ function render(){
     html += `</div>`;
   }
 
-  // FAB jen v záložce Dnes
-  if(tab==="dnes") html += `<button onclick="openAdd()" class="fab" title="Přidat jídlo">+</button>`;
+  // FAB
+  html += `<button onclick="openAdd()" class="fab">+</button>`;
 
   html += `</div>`;
   document.getElementById("app").innerHTML = html;
@@ -1192,34 +1234,16 @@ let _inlineMatches = {};
 
 function onInlineIngInput(inp, entryId){
   const q = normKey(inp.value);
-  const sug = document.getElementById("inline-sug-"+entryId);
-  if(!sug) return;
-  if(q.length < 2){ sug.style.display="none"; return; }
+  if(q.length < 2){ hideGlobalSuggest(); return; }
   const matches = Object.entries(FOOD_DB).filter(([k])=>k.includes(q)).slice(0,8).map(([,e])=>e);
-  _inlineMatches[entryId] = matches;
-  if(!matches.length){ sug.style.display="none"; return; }
-  sug.innerHTML = matches.map((e,i)=>`
-    <div data-idx="${i}" data-eid="${entryId}"
-      style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;font-size:13px"
-      onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background=''">
-      <span>${e[0]}</span>
-      <span style="color:var(--muted);font-size:11px">${e[1]} kcal/100g</span>
-    </div>`).join("");
-  sug.querySelectorAll("[data-idx]").forEach(el=>{
-    el.addEventListener("mousedown", ev=>{
-      ev.preventDefault();
-      const entry = (_inlineMatches[entryId]||[])[+el.dataset.idx];
-      if(!entry) return;
-      const nameInp = document.getElementById("add-ing-name-"+entryId);
-      const gInp = document.getElementById("add-ing-g-"+entryId);
-      if(nameInp) nameInp.value = entry[0];
-      if(gInp) gInp.value = isLiquid(entry[0]) ? 250 : 100;
-      sug.style.display="none";
-    });
+  showGlobalSuggest(inp, matches, (entry) => {
+    const nameInp = document.getElementById("add-ing-name-"+entryId);
+    const gInp = document.getElementById("add-ing-g-"+entryId);
+    if(nameInp) nameInp.value = entry[0];
+    if(gInp) gInp.value = getTypicalGrams(entry[0]);
+    hideGlobalSuggest();
   });
-  sug.style.display="block";
 }
-
 function hideInlineSug(entryId){
   const sug = document.getElementById("inline-sug-"+entryId);
   if(sug) sug.style.display="none";
@@ -1258,20 +1282,8 @@ function removeEntry(id){ entries=entries.filter(e=>e.id!==id); sv("ent_"+TODAY(
 function setTab(t){ tab=t; render(); }
 function setProfTab(t){ profTab=t; render(); }
 function toggleDark(){ dark=!dark; document.body.classList.toggle("dark",dark); sv("dark2",dark); render(); }
-function addEntry(data){ entries=[...entries,{...data,id:Date.now()+Math.random(),slot:activeSlot}]; sv("ent_"+TODAY(),entries); render(); }
+function addEntry(data){ entries=[...entries,{...data,id:Date.now(),slot:activeSlot}]; sv("ent_"+TODAY(),entries); render(); }
 function updProf(k,v){ profile={...profile,[k]:v}; sv("prof2",profile); render(); }
-
-function setFontSize(size){
-  profile = {...profile, fontSize: size};
-  sv("prof2", profile);
-  applyFontSize(size);
-  render();
-}
-
-function applyFontSize(size){
-  // Nastav přímo na html element - přežije render()
-  document.documentElement.style.fontSize = size;
-}
 
 function saveApiKey(){
   const inp = document.getElementById("gemini-key-inp");
@@ -1298,7 +1310,16 @@ async function testApiKey(){
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
     const body = JSON.stringify({contents:[{parts:[{text:'{"jidlo":"test","kcal":0,"b":0,"s":0,"t":0,"g":100}'}]}]});
     let r;
-    r = await fetch(url, { method:"POST", headers:{"Content-Type":"application/json"}, body });
+    r = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", url);
+      xhr.setRequestHeader("Content-Type", "application/json");
+      xhr.timeout = 10000;
+      xhr.onload = () => resolve({ status: xhr.status, json: () => Promise.resolve(JSON.parse(xhr.responseText || "{}")) });
+      xhr.onerror = () => reject(new Error("Síťová chyba"));
+      xhr.ontimeout = () => reject(new Error("Timeout"));
+      xhr.send(body);
+    });
     const td = await r.json().catch(()=>({}));
     if(r.status===200 || r.status===400){
       res_el.style.background="#f0fdf4"; res_el.style.border="1px solid #bbf7d0"; res_el.style.color="#16a34a";
@@ -1322,14 +1343,21 @@ function saveProxyUrl(){
   setToast(url ? "✓ Proxy uložena!" : "Proxy smazána");
   render();
 }
-
 function clearProxy(){
   profile = {...profile, proxyUrl: ""};
   sv("prof2", profile);
   setToast("Proxy smazána");
   render();
 }
-
+function setFontSize(size){
+  profile = {...profile, fontSize: size};
+  sv("prof2", profile);
+  applyFontSize(size);
+  render();
+}
+function applyFontSize(size){
+  document.documentElement.style.fontSize = size;
+}
 function clearApiKey(){
   profile = {...profile, geminiKey: ""};
   sv("prof2", profile);
@@ -1485,27 +1513,10 @@ function removeEditorIng(id){
 function onEditorIngInput(){
   const inp = document.getElementById("editor-ing-name");
   const q = normKey(inp.value);
-  const sug = document.getElementById("editor-ing-suggest");
-  if(!sug) return;
-  if(q.length<2){ sug.style.display="none"; _editorMatches=[]; return; }
+  if(q.length < 2){ hideGlobalSuggest(); _editorMatches=[]; return; }
   _editorMatches = Object.entries(FOOD_DB).filter(([k])=>k.includes(q)).slice(0,8).map(([,e])=>e);
-  if(!_editorMatches.length){ sug.style.display="none"; return; }
-  // Nastav pozici suggest box pod input polem
-  const rect = inp.getBoundingClientRect();
-  sug.style.top = (rect.bottom + window.scrollY + 4) + "px";
-  sug.style.left = "16px";
-  sug.style.right = "16px";
-  sug.innerHTML = _editorMatches.map((e,i)=>`
-    <div data-idx="${i}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;font-size:13px"
-      onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background=''">
-      <span>${e[0]}</span><span style="color:var(--muted);font-size:11px">${e[1]} kcal/100g</span>
-    </div>`).join("");
-  sug.querySelectorAll("[data-idx]").forEach(el=>{
-    el.addEventListener("mousedown",ev=>{ ev.preventDefault(); selectEditorIng(_editorMatches[+el.dataset.idx]); });
-  });
-  sug.style.display="block";
+  showGlobalSuggest(inp, _editorMatches, (entry) => selectEditorIng(entry));
 }
-
 function selectEditorIng(entry){
   document.getElementById("editor-ing-name").value = entry[0];
   document.getElementById("editor-ing-g").value = isLiquid(entry[0])?250:100;
@@ -1576,33 +1587,27 @@ function setToast(msg){
 let _aiMatches = [];
 
 function onAiInput(){
-  const q = normKey(document.getElementById("ai-input").value);
-  const sug = document.getElementById("ai-suggest");
-  if(q.length < 2){ sug.style.display="none"; _aiMatches=[]; return; }
-  _aiMatches = Object.entries(FOOD_DB).filter(([k])=>k.includes(q)).slice(0,8).map(([,e])=>e);
-  if(!_aiMatches.length){ sug.style.display="none"; return; }
-  sug.innerHTML = _aiMatches.map((e,i)=>`
-    <div data-idx="${i}"
-      style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:13px"
-      onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background=''">
-      <span>${e[0]}</span>
-      <span style="color:var(--muted);font-size:11px">${e[1]} kcal/100g</span>
-    </div>`).join("");
-  sug.querySelectorAll("[data-idx]").forEach(el=>{
-    el.addEventListener("mousedown", ev=>{
-      ev.preventDefault();
-      selectSug(_aiMatches[+el.dataset.idx]);
-    });
+  const inp = document.getElementById("ai-input");
+  const q = normKey(inp.value);
+  if(q.length < 2){ hideGlobalSuggest(); return; }
+  const matches = Object.entries(FOOD_DB).filter(([k])=>k.includes(q)).slice(0,8).map(([,e])=>e);
+  showGlobalSuggest(inp, matches, (entry) => {
+    inp.value = entry[0];
+    hideGlobalSuggest();
+    const gInp = document.getElementById("ai-g");
+    if(gInp){ const tg = getTypicalGrams(entry[0]); gInp.value = tg; }
   });
-  sug.style.display="block";
 }
 function onAiKey(ev){
   if(ev.key==="Enter"&&!ev.shiftKey){ ev.preventDefault(); handleDB(); }
-  if(ev.key==="Escape") document.getElementById("ai-suggest").style.display="none";
+  if(ev.key==="Escape") hideGlobalSuggest();
 }
 function selectSug(entry){
   document.getElementById("ai-input").value = entry[0];
-  document.getElementById("ai-suggest").style.display="none";
+  hideGlobalSuggest();
+  // Nastav typickou gramáž
+  const gInp = document.getElementById("ai-g");
+  if(gInp){ const tg = getTypicalGrams(entry[0]); if(tg!==100) gInp.value = tg; }
 }
 function handleDB(){
   const txt = document.getElementById("ai-input").value.trim();
@@ -1612,13 +1617,118 @@ function handleDB(){
   if(found){
     addEntry(makeEntry(found, g));
     document.getElementById("ai-input").value="";
-    document.getElementById("ai-suggest").style.display="none";
+    hideGlobalSuggest();
     showOk(found[0]+" přidáno ("+Math.round(found[1]*g/100)+" kcal)");
     setTimeout(closeAdd,1200);
   } else {
     showErr("Nenalezeno v DB. Zkus Gemini AI nebo ruční zadání.");
   }
 }
+
+async function handleAiPhotoFromScan(base64Data){
+  const key = profile.geminiKey;
+  if(!key) {
+    document.getElementById("scan-status").innerHTML = `<span style="color:#fca5a5">Kód nerozpoznán</span><br/><small style="font-weight:400;opacity:0.8">Tip: Nastav Gemini klíč v Profilu pro AI rozpoznávání.</small>`;
+    return;
+  }
+  
+  try {
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
+    const base64Content = base64Data.split(',')[1];
+    const prompt = GEMINI_PROMPT + "\n\nNa fotce je čárový kód produktu, který se nepodařilo přečíst. Zkus identifikovat produkt podle obalu a odhadnout jeho nutriční hodnoty na 100g.";
+    
+    const body = JSON.stringify({
+      contents: [{
+        parts: [
+          {inline_data: {mime_type: "image/jpeg", data: base64Content}},
+          {text: prompt}
+        ]
+      }]
+    });
+
+    const r = await fetch(geminiUrl, { method: "POST", headers: {"Content-Type":"application/json"}, body });
+    const d = await r.json();
+    const raw = (d.candidates?.[0]?.content?.parts?.[0]?.text||"").replace(/```json|```/g,"").trim();
+    const parsed = JSON.parse(raw);
+    
+    if(parsed.jidlo) {
+      if(document.getElementById("scanner").style.display !== "none") closeScanner();
+      openAdd();
+      addEntry({...parsed, porce_g:parsed.porce_g||100, source:"ai"});
+      showOk("AI: " + parsed.jidlo + " rozpoznáno z fotky");
+      setTimeout(closeAdd, 1500);
+    } else {
+      throw new Error("AI produkt nerozpoznalo");
+    }
+  } catch(e) {
+    document.getElementById("scan-status").innerHTML = `<span style="color:#fca5a5">Nepodařilo se rozpoznat</span><br/><small style="font-weight:400;opacity:0.8">Zkuste to prosím ručně.</small>`;
+  }
+}
+
+async function handleScanFile(inp){
+  const file = inp.files[0];
+  if(!file) return;
+  document.getElementById("scanner").style.display = "flex";
+  const statusEl = document.getElementById("scan-status");
+  statusEl.textContent = "Zpracovávám fotku…";
+
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    // 1. Zkus nativní BarcodeDetector na obrázku
+    if("BarcodeDetector" in window){
+      try {
+        const img = new Image();
+        img.src = e.target.result;
+        await new Promise(res => img.onload = res);
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width; canvas.height = img.height;
+        canvas.getContext("2d").drawImage(img, 0, 0);
+        const detector = new BarcodeDetector({formats:["ean_13","ean_8","upc_a","upc_e","code_128","code_39"]});
+        const codes = await detector.detect(canvas);
+        if(codes.length){
+          if(document.getElementById("scanner").style.display !== "none") closeScanner();
+          openAdd(); setMode("ean");
+          lookupBarcode(codes[0].rawValue);
+          return;
+        }
+      } catch(_){}
+    }
+
+    // 2. Zkus Quagga
+    try {
+      if(!window.Quagga){
+        await new Promise((res,rej)=>{
+          const s = document.createElement("script");
+          s.src = "https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.4/dist/quagga.min.js";
+          s.onload = res; s.onerror = rej;
+          document.head.appendChild(s);
+        });
+      }
+      Quagga.decodeSingle({
+        src: e.target.result,
+        numOfWorkers: 0,
+        inputStream: { size: 1600 },
+        decoder: { readers:["ean_reader","ean_8_reader","upc_reader","upc_e_reader","code_128_reader"] },
+        locate: true
+      }, (result) => {
+        if(result && result.codeResult){
+          if(document.getElementById("scanner").style.display !== "none") closeScanner();
+          openAdd(); setMode("ean");
+          lookupBarcode(result.codeResult.code);
+        } else {
+          // 3. Fallback AI
+          statusEl.innerHTML = `<span style="color:#fca5a5">Kód nerozpoznán</span><br/><small>Zkouším AI analýzu…</small>`;
+          handleAiPhotoFromScan(e.target.result);
+        }
+      });
+    } catch(err) {
+      statusEl.textContent = "Chyba: " + err.message;
+      handleAiPhotoFromScan(e.target.result);
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
 
 // ── Photo helpers ────────────────────────────────────────────────────────────
 let _photoBase64 = null;
@@ -1667,6 +1777,8 @@ async function handleAI(){
 
   try{
     const g = parseFloat(document.getElementById("ai-g").value)||100;
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
+
     // Build parts: optional image + text
     const parts = [];
     if(_photoBase64){
@@ -1674,33 +1786,26 @@ async function handleAI(){
     }
     const textPrompt = GEMINI_PROMPT+"\n\n"+(txt ? "Jídlo/porce: "+txt : "Analyzuj jídlo na fotce")+(g!==100?" (porce "+g+"g)":"");
     parts.push({text: textPrompt});
-    const geminiBody = {contents:[{parts}]};
 
-    const proxyUrl = profile.proxyUrl;
-    let resp;
-    if(proxyUrl){
-      // Volání přes proxy (Cloudflare Worker)
-      resp = await fetch(proxyUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key, model: profile.geminiModel||"gemini-1.5-flash", body: geminiBody })
-      });
-    } else {
-      // Přímé volání
-      const models = ["gemini-1.5-flash","gemini-2.0-flash-lite","gemini-1.5-flash-8b"];
-      for(const m of models){
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${key}`;
+    const body = JSON.stringify({contents:[{parts}]});
+
+    // XMLHttpRequest - lépe funguje na Androidu/mobile
+    const d = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", geminiUrl);
+      xhr.setRequestHeader("Content-Type", "application/json");
+      xhr.timeout = 20000;
+      xhr.onload = () => {
         try {
-          resp = await fetch(url, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(geminiBody) });
-          if(resp.status !== 404) break;
-        } catch(e){ if(m===models[models.length-1]) throw e; }
-      }
-    }
-    if(!resp || !resp.ok){
-      const errData = await resp?.json().catch(()=>({}));
-      throw new Error(errData?.error?.message || "HTTP "+(resp?.status||"?"));
-    }
-    const d = await resp.json();
+          const data = JSON.parse(xhr.responseText);
+          if(xhr.status >= 400) reject(new Error(data?.error?.message || "HTTP "+xhr.status));
+          else resolve(data);
+        } catch(e) { reject(new Error("Chyba parsování odpovědi")); }
+      };
+      xhr.onerror = () => reject(new Error("Síťová chyba – zkontroluj internet a API klíč na aistudio.google.com/apikey"));
+      xhr.ontimeout = () => reject(new Error("Vypršel časový limit – Gemini neodpovídá"));
+      xhr.send(body);
+    });
     const raw = (d.candidates?.[0]?.content?.parts?.[0]?.text||"").replace(/```json|```/g,"").trim();
     if(!raw) throw new Error("Prázdná odpověď od AI");
     const parsed = JSON.parse(raw);
@@ -1731,36 +1836,26 @@ let _manualEntry = null; // uložená DB položka na 100g
 let _manualMatches = [];
 
 function onManualInput(){
-  const q = normKey(document.getElementById("m-name").value);
-  const sug = document.getElementById("m-suggest");
+  const inp = document.getElementById("m-name");
+  const q = normKey(inp.value);
   _manualEntry = null;
   document.getElementById("m-autofill-info").style.display="none";
-  checkLiquidMode(document.getElementById("m-name").value);
-  if(q.length < 2){ sug.style.display="none"; _manualMatches=[]; return; }
+  checkLiquidMode(inp.value);
+  if(q.length < 2){ hideGlobalSuggest(); _manualMatches=[]; return; }
   _manualMatches = Object.entries(FOOD_DB).filter(([k])=>k.includes(q)).slice(0,8).map(([,e])=>e);
-  if(!_manualMatches.length){ sug.style.display="none"; return; }
-  sug.innerHTML = _manualMatches.map((e,i)=>`
-    <div data-idx="${i}"
-      style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:13px"
-      onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background=''">
-      <span>${e[0]}</span>
-      <span style="color:var(--muted);font-size:11px">${e[1]} kcal / 100g</span>
-    </div>`).join("");
-  sug.querySelectorAll("[data-idx]").forEach(el=>{
-    el.addEventListener("mousedown", ev=>{
-      ev.preventDefault();
-      selectManualSug(_manualMatches[+el.dataset.idx]);
-    });
-  });
-  sug.style.display="block";
+  showGlobalSuggest(inp, _manualMatches, (entry) => selectManualSug(entry));
 }
 
 function selectManualSug(entry){
   _manualEntry = entry;
   document.getElementById("m-name").value = entry[0];
-  document.getElementById("m-suggest").style.display="none";
+  hideGlobalSuggest();
   checkLiquidMode(entry[0]);
-  fillManualFromEntry(entry, parseFloat(document.getElementById("m-g").value)||100);
+  // Nastav typickou gramáž
+  const gInp = document.getElementById("m-g");
+  const tg = getTypicalGrams(entry[0]);
+  if(gInp && tg !== 100) gInp.value = tg;
+  fillManualFromEntry(entry, parseFloat(gInp?.value)||tg);
 }
 
 function checkLiquidMode(name){
@@ -1795,7 +1890,8 @@ function onManualGrams(){
 }
 
 function onManualKey(ev){
-  if(ev.key==="Escape") document.getElementById("m-suggest").style.display="none";
+  if(ev.key==="Escape") hideGlobalSuggest();
+  if(ev.key==="Enter"){ ev.preventDefault(); hideGlobalSuggest(); handleManual(); }
 }
 
 // ── Manual ────────────────────────────────────────────────────────────────────
@@ -1826,136 +1922,200 @@ async function handleEan(){
 
 async function lookupBarcode(code){
   clearMsg();
-  showOk("Hledám produkt…");
+  showOk("Hledám produkt v databázi…");
+  // 1) Zkus Open Food Facts
   try{
-    // Zkus přes proxy worker pokud je nastaven, jinak přímo
-    let d;
-    const proxyUrl = profile.proxyUrl;
-    if(proxyUrl){
-      const r = await fetch(proxyUrl, {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ barcode: code })
+    const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}?fields=product_name,product_name_cs,brands,nutriments,serving_size`);
+    const d = await r.json();
+    if(d.status===1 && d.product){
+      const p = d.product;
+      const n = p.nutriments||{};
+      const name = p.product_name_cs||p.product_name||p.brands||"Produkt "+code;
+      const porce = parseFloat(p.serving_size)||100;
+      const kcal100 = parseFloat(n["energy-kcal_100g"])||parseFloat(n["energy-kcal_serving"])||0;
+      addEntry({
+        jidlo:name, porce_g:porce,
+        kcal:kcal100*porce/100,
+        b:(parseFloat(n.proteins_100g)||0)*porce/100,
+        s:(parseFloat(n.carbohydrates_100g)||0)*porce/100,
+        t:(parseFloat(n.fat_100g)||0)*porce/100,
+        vl:(parseFloat(n.fiber_100g)||0)*porce/100,
+        isWater:isLiquid(name), source:"barcode"
       });
-      d = await r.json();
-    } else {
-      const r = await fetch(`https://world.openfoodfacts.org/api/v0/product/${code}.json`);
-      d = await r.json();
+      showOk(name+" přidáno!");
+      setTimeout(closeAdd,1200);
+      return;
     }
-    if(d.status!==1) throw new Error("Produkt nenalezen v databázi Open Food Facts");
-    const p = d.product;
-    const n = p.nutriments||{};
-    const name = p.product_name_cs||p.product_name||p.brands||"Produkt "+code;
-    const porce = parseFloat(p.serving_size)||100;
-    addEntry({
-      jidlo:name, porce_g:porce,
-      kcal:(parseFloat(n["energy-kcal_100g"])||parseFloat(n["energy-kcal"])||0)*porce/100,
-      b:(parseFloat(n.proteins_100g)||0)*porce/100,
-      s:(parseFloat(n.carbohydrates_100g)||0)*porce/100,
-      t:(parseFloat(n.fat_100g)||0)*porce/100,
-      vl:(parseFloat(n.fiber_100g)||0)*porce/100,
-      isWater:isLiquid(name), source:"barcode"
-    });
-    showOk(name+" přidáno!");
-    setTimeout(closeAdd,1200);
-  }catch(e){
-    showErr(e.message||"Produkt nenalezen.");
+  }catch(_){}
+
+  // 2) Fallback – Gemini AI (pokud je klíč)
+  if(profile.geminiKey){
+    showOk("V databázi nenalezeno – zkouším AI odhad…");
+    try{
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${profile.geminiKey}`;
+      const prompt = GEMINI_PROMPT+`
+
+EAN čárový kód: ${code}. Identifikuj tento produkt (může jít o český produkt z řetězců jako Albert, Lidl, Penny, Billa) a uveď jeho nutriční hodnoty na 100g. Pokud nevíš přesný název, odhadni typ jídla podle číselné řady EAN a uveď průměrné hodnoty.`;
+      const d = await new Promise((resolve, reject)=>{
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", geminiUrl);
+        xhr.setRequestHeader("Content-Type","application/json");
+        xhr.timeout=12000;
+        xhr.onload=()=>{ try{ const data=JSON.parse(xhr.responseText); if(xhr.status>=400) reject(new Error(data?.error?.message||"HTTP "+xhr.status)); else resolve(data); }catch(e){reject(e);} };
+        xhr.onerror=()=>reject(new Error("Síťová chyba"));
+        xhr.ontimeout=()=>reject(new Error("Timeout"));
+        xhr.send(JSON.stringify({contents:[{parts:[{text:prompt}]}]}));
+      });
+      const raw=(d.candidates?.[0]?.content?.parts?.[0]?.text||"").replace(/```json|```/g,"").trim();
+      const parsed=JSON.parse(raw);
+      if(parsed.jidlo && typeof parsed.kcal==="number"){
+        addEntry({...parsed, porce_g:parsed.porce_g||100, source:"barcode"});
+        showOk("AI: "+parsed.jidlo+" přidáno (odhad)");
+        setTimeout(closeAdd,1500);
+        return;
+      }
+    }catch(_){}
   }
+
+  // 3) Nic nenašlo
+  showErr("Produkt (EAN "+code+") nenalezen. Zkus ručně v záložce ✏️.");
 }
 
 // ── Scanner (Quagga2) ─────────────────────────────────────────────────────────
 function openScanner(){
-  document.getElementById("scanner").style.display="flex";
-  document.getElementById("scan-status").textContent="Načítám kameru…";
-  startQuagga();
+  // Místo spouštění video streamu (který má Permission Denied) 
+  // rovnou simulujeme kliknutí na "Vyfotit čárový kód"
+  document.getElementById("scan-file-inp").click();
 }
 
 function closeScanner(){
   document.getElementById("scanner").style.display="none";
-  if(_scanInterval){ clearInterval(_scanInterval); _scanInterval=null; }
-  if(_scanStream){ _scanStream.getTracks().forEach(t=>t.stop()); _scanStream=null; }
+  try{ if(window.Quagga) Quagga.stop(); }catch(_){}
+  try{ if(_scanStream){ _scanStream.getTracks().forEach(t=>t.stop()); _scanStream=null; } }catch(_){}
+  try{ if(_scanAnimFrame){ cancelAnimationFrame(_scanAnimFrame); _scanAnimFrame=null; } }catch(_){}
+  const video=document.getElementById("scan-vid");
+  if(video){ video.srcObject=null; }
 }
 
 let _scanStream = null;
-let _scanInterval = null;
+let _scanAnimFrame = null;
 
-function startQuagga(){
-  const vid = document.getElementById("scan-vid");
-  const status = document.getElementById("scan-status");
-  if(!vid || !status) return;
+async function startQuagga(){
+  const statusEl = document.getElementById("scan-status");
+  const video = document.getElementById("scan-vid");
 
-  status.textContent = "Spouštím kameru…";
+  // Zastav předchozí stream
+  if(_scanStream){ _scanStream.getTracks().forEach(t=>t.stop()); _scanStream=null; }
+  if(_scanAnimFrame){ cancelAnimationFrame(_scanAnimFrame); _scanAnimFrame=null; }
 
-  // Zkus zadní kameru, pokud selže zkus jakoukoliv
-  const tryCamera = (constraints) => navigator.mediaDevices.getUserMedia(constraints);
-  
-  tryCamera({ video: { facingMode: { ideal: "environment" } } })
-  .catch(() => tryCamera({ video: true }))
-  .then(stream => {
-    _scanStream = stream;
-    vid.srcObject = stream;
-    vid.setAttribute("playsinline", "");
-    vid.setAttribute("autoplay", "");
-    vid.muted = true;
-    vid.onloadedmetadata = () => { vid.play().catch(()=>{}); };
-    const playPromise = vid.play();
-    if(playPromise !== undefined){
-      playPromise.then(()=>{
-        status.textContent = "Namiř na čárový kód…";
-      }).catch(err=>{
-        status.textContent = "Chyba přehrávání: "+err.message;
-      });
-    } else {
-      status.textContent = "Namiř na čárový kód…";
-    }
-
-    // Zkus nativní BarcodeDetector
-    if("BarcodeDetector" in window){
-      const detector = new BarcodeDetector({ formats: ["ean_13","ean_8","upc_a","upc_e","code_128","qr_code"] });
-      _scanInterval = setInterval(async () => {
-        if(vid.readyState < 2) return;
+  // 1) Zkus nativní BarcodeDetector (Android Chrome, Safari 17+)
+  if("BarcodeDetector" in window){
+    statusEl.textContent="Spouštím kameru…";
+    try{
+      // Zjednodušené volání kamery pro maximální kompatibilitu
+      try {
+        _scanStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" }
+        });
+      } catch(e1) {
         try {
-          const codes = await detector.detect(vid);
-          if(codes.length > 0){
-            clearInterval(_scanInterval);
-            _scanStream?.getTracks().forEach(t=>t.stop());
-            closeScanner();
-            openAdd();
-            setMode("ean");
-            lookupBarcode(codes[0].rawValue);
+          _scanStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        } catch(e2) {
+          // Pokud selže i základní přístup, zkusíme vyvolat systémový dialog znovu po krátké pauze
+          // nebo vyhodíme srozumitelnou chybu
+          if (e2.name === "NotAllowedError" || e2.name === "PermissionDeniedError") {
+            throw new Error("Přístup ke kameře byl zamítnut. Prosím, povolte kameru v nastavení prohlížeče.");
           }
-        } catch(_){}
-      }, 300);
-    } else {
-      // Fallback - ruční EAN zadání
-      status.textContent = "Kamera spuštěna. Tvůj prohlížeč nepodporuje automatické skenování – zadej EAN ručně.";
+          throw new Error("Kamera nebyla nalezena nebo není dostupná.");
+        }
+      }
+      video.srcObject = _scanStream;
+      // Přidání catch pro play() pro případ, že prohlížeč blokuje autoplay
+      await video.play().catch(e => {
+        console.error("Autoplay blocked:", e);
+        statusEl.textContent = "Klikni pro spuštění videa";
+        video.onclick = () => video.play();
+      });
+      const detector = new BarcodeDetector({formats:["ean_13","ean_8","upc_a","upc_e","code_128","code_39"]});
+      statusEl.textContent="Namiř na čárový kód…";
+      let lastCode = null, sameCount = 0;
+      const scan = async()=>{
+        if(!document.getElementById("scanner") || document.getElementById("scanner").style.display==="none") return;
+        try{
+          const barcodes = await detector.detect(video);
+          if(barcodes.length){
+            const code = barcodes[0].rawValue;
+            if(code===lastCode){ sameCount++; } else { lastCode=code; sameCount=1; }
+            if(sameCount>=2){  // confirm same code twice
+              if(_scanStream){ _scanStream.getTracks().forEach(t=>t.stop()); _scanStream=null; }
+              closeScanner(); openAdd(); setMode("ean");
+              lookupBarcode(code);
+              return;
+            }
+          }
+        }catch(_){}
+        _scanAnimFrame = requestAnimationFrame(()=>setTimeout(scan, 250));
+      };
+      scan();
+      return;
+    }catch(err){
+      console.error("Scanner error:", err);
+      statusEl.innerHTML = `<span style="color:#fca5a5">Chyba: ${err.message}</span><br/><small style="font-weight:400;opacity:0.8">Zkuste kód vyfotit tlačítkem níže.</small>`;
+      document.getElementById("scan-fallback-btn").style.display = "block";
+      return;
     }
-  }).catch(err => {
-    status.textContent = "Chyba kamery: " + err.message + ". Povol přístup ke kameře.";
+  }
+
+  // 2) Fallback – Quagga2 (starší prohlížeče)
+  statusEl.textContent="Načítám scanner…";
+  const loadLib = () => new Promise((res,rej)=>{
+    if(window.Quagga){ res(); return; }
+    const s=document.createElement("script");
+    s.src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.4/dist/quagga.min.js";
+    s.onload=res; s.onerror=()=>rej(new Error("Nepodařilo se načíst scanner"));
+    document.head.appendChild(s);
   });
+  loadLib().then(()=>{
+    Quagga.init({
+      inputStream:{
+        name:"Live",
+        type:"LiveStream",
+        target:video,
+        constraints:{
+          facingMode:"environment",
+          width: { min: 640 },
+          height: { min: 480 }
+        }
+      },
+      decoder:{readers:["ean_reader","ean_8_reader","upc_reader","code_128_reader"]},
+      locate:true,
+    },(err)=>{
+      if(err){ 
+        console.error("Quagga init error:", err);
+        statusEl.innerHTML = `<span style="color:#fca5a5">Kamera nelze spustit</span><br/><small style="font-weight:400;opacity:0.8">Použijte tlačítko pro vyfocení kódu.</small>`;
+        document.getElementById("scan-fallback-btn").style.display = "block";
+        return; 
+      }
+      Quagga.start();
+      statusEl.textContent="Namiř na čárový kód…";
+    });
+    Quagga.onDetected((result)=>{
+      const code=result.codeResult.code;
+      if(code){ Quagga.stop(); closeScanner(); openAdd(); setMode("ean"); lookupBarcode(code); }
+    });
+  }).catch(e=>{ statusEl.textContent="Chyba: "+e.message; });
 }
 
 // ── Receptář ─────────────────────────────────────────────────────────────────
 let _recMatches = [];
 
 function onRecInput(){
-  const q = normKey(document.getElementById("rec-name").value);
-  const sug = document.getElementById("rec-suggest");
-  if(!sug) return;
-  if(q.length < 2){ sug.style.display="none"; _recMatches=[]; return; }
+  const inp = document.getElementById("rec-name");
+  const q = normKey(inp.value);
+  if(q.length < 2){ hideGlobalSuggest(); _recMatches=[]; return; }
   _recMatches = Object.entries(FOOD_DB).filter(([k])=>k.includes(q)).slice(0,8).map(([,e])=>e);
-  if(!_recMatches.length){ sug.style.display="none"; return; }
-  sug.innerHTML = _recMatches.map((e,i)=>`
-    <div data-idx="${i}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;font-size:13px"
-      onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background=''">
-      <span>${e[0]}</span><span style="color:var(--muted);font-size:11px">${e[1]} kcal/100g</span>
-    </div>`).join("");
-  sug.querySelectorAll("[data-idx]").forEach(el=>{
-    el.addEventListener("mousedown", ev=>{ ev.preventDefault(); selectRecSug(_recMatches[+el.dataset.idx]); });
-  });
-  sug.style.display="block";
+  showGlobalSuggest(inp, _recMatches, (entry) => selectRecSug(entry));
 }
-
 function onRecKey(ev){
   if(ev.key==="Enter"){ ev.preventDefault(); addRecipeItem(); }
   if(ev.key==="Escape"){ const s=document.getElementById("rec-suggest"); if(s)s.style.display="none"; }
@@ -2033,6 +2193,40 @@ function startEdit(id){
 }
 
 
+// ── Macro detail ─────────────────────────────────────────────────────────────
+function showMacroDetail(label, type){
+  const T = totals(), tg = targets();
+  let val = 0, items = [], goal = 0;
+  const unitMap = {protein:"g",carbs:"g",fat:"g",fiber:"g"};
+  const keyMap = {protein:"b",carbs:"s",fat:"t",fiber:"vl"};
+  const goalMap = {protein:tg.protein,carbs:tg.sacharidy,fat:tg.tuky,fiber:tg.vlaknina};
+  const k = keyMap[type]; if(!k) return;
+  val = T[k]; goal = goalMap[type];
+  items = entries.filter(e=>(e[k]||0)>0).map(e=>({name:e.jidlo,value:e[k],slot:e.slot})).sort((a,b)=>b.value-a.value);
+  const over = val > goal;
+  const pct = Math.min(Math.round(val/goal*100), 999);
+  const listHtml = items.length ? items.map(i=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div><span style="font-weight:600">${i.name}</span> <span style="color:var(--muted);font-size:11px">(${i.slot})</span></div>
+      <span style="font-weight:700">${i.value.toFixed(1)} g</span>
+    </div>`).join("") : '<div style="text-align:center;padding:20px;color:var(--muted)">Žádné záznamy</div>';
+  const col = over ? "#ef4444" : "#22c55e";
+  document.getElementById("macro-detail-title").textContent = label + " – přehled";
+  document.getElementById("macro-detail-list").innerHTML = `
+    <div style="padding:12px;background:var(--surface);border-radius:10px;margin-bottom:12px;display:flex;justify-content:space-between">
+      <div><div style="font-size:12px;color:var(--muted)">Přijato</div><div style="font-size:20px;font-weight:800">${val.toFixed(1)} g</div></div>
+      <div style="text-align:right"><div style="font-size:12px;color:var(--muted)">Cíl</div><div style="font-size:20px;font-weight:800">${goal} g</div></div>
+      <div style="text-align:right"><div style="font-size:12px;color:var(--muted)">Plnění</div><div style="font-size:20px;font-weight:800;color:${col}">${pct}%</div></div>
+    </div>
+    ${listHtml}`;
+  document.getElementById("macro-detail-total").innerHTML = `${over?"⚠️ Přesaženo o "+(val-goal).toFixed(1)+" g":"✓ Zbývá "+(goal-val).toFixed(1)+" g"}`;
+  document.getElementById("macro-detail-modal").style.display = "flex";
+}
+
+function closeMacroDetail(){
+  document.getElementById("macro-detail-modal").style.display = "none";
+}
+
 // ── Rychlé opakování ─────────────────────────────────────────────────────────
 function repeatEntry(id){
   const e = entries.find(x=>x.id===id);
@@ -2041,15 +2235,17 @@ function repeatEntry(id){
   setToast("🔁 "+e.jidlo+" přidáno znovu");
 }
 
-function repeatEntry(btn){
-  try{
-    const e = JSON.parse(decodeURIComponent(btn.dataset.e));
-    repeatFromHistory(e.jidlo,e.porce_g,e.kcal,e.b,e.s,e.t,e.vl,e.isWater,e.source,e.slozky);
-  }catch(err){ setToast('Chyba při opakování'); }
-}
 function repeatFromHistory(jidlo, porce_g, kcal, b, s, t, vl, isWater, source, slozky){
   addEntry({jidlo, porce_g, kcal, b, s, t, vl, isWater:!!isWater, source, slozky:slozky||undefined});
   setToast("🔁 "+jidlo+" přidáno");
+}
+
+function repeatYesterday(idx){
+  const items = window._ydItems||[];
+  const e = items[idx];
+  if(!e) return;
+  addEntry({...e, id:undefined});
+  setToast("🔁 "+e.jidlo+" přidáno");
 }
 
 // ── Záznam váhy ──────────────────────────────────────────────────────────────
@@ -2189,8 +2385,6 @@ function autoSaveHistory(){
   });
 }
 
-// Nastav uloženou velikost písma
-if(profile.fontSize) applyFontSize(profile.fontSize);
 // Spusť auto-uložení při startu
 autoSaveHistory();
 
@@ -2212,8 +2406,56 @@ setInterval(()=>{
 }, 60000);
 window._lastDay = TODAY();
 
-// ── Start ─────────────────────────────────────────────────────────────────────
-// Načti DB a pak render
+// ── Globální suggest overlay ──────────────────────────────────────────────────
+function showGlobalSuggest(inputEl, items, onSelect){
+  if(!items || !items.length){ hideGlobalSuggest(); return; }
+  let sug = document.getElementById("g-suggest");
+  if(!sug){
+    sug = document.createElement("div");
+    sug.id = "g-suggest";
+    sug.style.cssText = "position:fixed;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.25);z-index:10000;max-height:220px;overflow-y:auto;-webkit-overflow-scrolling:touch";
+    document.body.appendChild(sug);
+  }
+  const rect = inputEl.getBoundingClientRect();
+  const top = rect.bottom + 4;
+  const maxH = window.innerHeight - top - 12;
+  sug.style.top = top + "px";
+  sug.style.left = Math.max(8, rect.left) + "px";
+  sug.style.width = rect.width + "px";
+  sug.style.maxHeight = Math.min(220, Math.max(80, maxH)) + "px";
+  sug.innerHTML = items.map((e, i) => `
+    <div data-idx="${i}" style="padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:14px">
+      <span style="font-weight:500">${e[0]}</span>
+      <span style="color:var(--muted);font-size:12px;margin-left:8px;flex-shrink:0">${e[1]} kcal/100g</span>
+    </div>`).join("");
+  sug.querySelectorAll("[data-idx]").forEach(el => {
+    const pick = (ev) => {
+      ev.preventDefault(); ev.stopPropagation();
+      hideGlobalSuggest();
+      onSelect(items[+el.dataset.idx]);
+    };
+    el.addEventListener("touchend", pick, {passive:false});
+    el.addEventListener("mousedown", pick);
+  });
+  sug.style.display = "block";
+}
+
+function hideGlobalSuggest(){
+  const sug = document.getElementById("g-suggest");
+  if(sug) sug.style.display = "none";
+}
+
+document.addEventListener("touchstart", e => {
+  const sug = document.getElementById("g-suggest");
+  if(sug && sug.style.display !== "none" && !sug.contains(e.target)) hideGlobalSuggest();
+}, {passive:true});
+document.addEventListener("mousedown", e => {
+  const sug = document.getElementById("g-suggest");
+  if(sug && sug.style.display !== "none" && !sug.contains(e.target)) hideGlobalSuggest();
+});
+
+// ── Start ──// ── Start ─────────────────────────────────────────────────────────────────────
+if(profile.fontSize) applyFontSize(profile.fontSize);
 loadFoodDB().then(() => render());
 </script>
 <script>
@@ -2225,5 +2467,9 @@ if("serviceWorker" in navigator){
   navigator.serviceWorker.register("sw.js").catch(()=>{});
 }
 </script>
+  <!-- Globální suggest overlay pro Android -->
+  <div id="g-suggest" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"
+    style="display:none;position:fixed;left:12px;right:12px;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.25);z-index:10000;max-height:220px;overflow-y:auto;-webkit-overflow-scrolling:touch">
+  </div>
 </body>
 </html>
