@@ -375,12 +375,20 @@ async function loadFoodDB(){
     }
   } catch(_){}
 
-  // Stažení souboru
+  // Stažení souboru – zkusí lokální soubor, pak GitHub Raw (fallback pro file://)
+  const GITHUB_RAW_URL = "https://raw.githubusercontent.com/wulf6/Kalorie/main/db.json";
+  async function fetchDBText(){
+    try {
+      const r = await fetch("db.json?v="+Date.now(), { cache:"no-cache" });
+      if(r.ok){ const t=await r.text(); if(t.length>500) return t; }
+    } catch(_){}
+    const r2 = await fetch(GITHUB_RAW_URL+"?v="+Date.now(), { cache:"no-cache" });
+    if(!r2.ok) throw new Error("GitHub HTTP "+r2.status);
+    return r2.text();
+  }
   try {
     if(splashStatus) splashStatus.textContent = "stahuji databázi…";
-    const response = await fetch("db.json?v="+Date.now(), { cache:"no-cache" });
-    if(!response.ok) throw new Error("HTTP "+response.status);
-    const text = await response.text();
+    const text = await fetchDBText();
 
     const newDB = parseCSVtoDB(text);
     const count = Object.keys(newDB).length;
@@ -1027,7 +1035,7 @@ function render(){
           ${Object.keys(FOOD_DB).length>100
             ?'✅ Databáze: <b>'+Object.keys(FOOD_DB).length+'</b> potravin načteno'
             :'⚠️ Databáze se načítá… ('+Object.keys(FOOD_DB).length+' položek)'}
-          <button onclick="localStorage.removeItem('food_db_cache');localStorage.removeItem('food_db_cache_ver');loadFoodDB().then(render)" style="float:right;background:transparent;border:none;color:#6366f1;font-size:11px;cursor:pointer;font-weight:600">🔄 Znovu načíst</button>
+          <button onclick="['food_db_cache','food_db_cache_ver','food_db_cache_v8','food_db_cache_v9','food_db_cache_time_v8','food_db_cache_time_v9'].forEach(k=>localStorage.removeItem(k));loadFoodDB().then(render)" style="float:right;background:transparent;border:none;color:#6366f1;font-size:11px;cursor:pointer;font-weight:600">🔄 Znovu načíst</button>
         </div>
 
         <!-- Stav klíče -->
