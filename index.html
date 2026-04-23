@@ -360,6 +360,16 @@ function getTypicalGrams(name){
 
 // Načtení databáze potravin
 async function loadFoodDB(){
+  // Vymaž service worker cache pro db.json
+  if(window.caches){
+    try {
+      const keys = await caches.keys();
+      for(const k of keys){
+        const cache = await caches.open(k);
+        await cache.delete(new Request("db.json"));
+      }
+    } catch(_){}
+  }
   try {
     const cached = localStorage.getItem("food_db_cache");
     const cacheTime = localStorage.getItem("food_db_cache_time");
@@ -371,7 +381,7 @@ async function loadFoodDB(){
     }
   } catch(_){}
   try {
-    const r = await fetch("db.json?t="+Date.now());
+    const r = await fetch("db.json?v="+Date.now(), {cache:"no-cache"});
     if(r.ok){
       const data = await r.json();
       Object.assign(FOOD_DB, data);
@@ -2210,7 +2220,22 @@ function renderRecipeList(){
       <span style="font-weight:800;color:#f97316">${Math.round(rTot.k)} kcal | B:${rTot.b.toFixed(1)} S:${rTot.s.toFixed(1)} T:${rTot.t.toFixed(1)}g</span>
     </div>
   </div>`;
-  if(saveEl) saveEl.style.display = "block";
+  if(saveEl){
+    saveEl.style.display = "block";
+    // Přidej obsah pokud ještě není
+    if(!document.getElementById("rec-final-name")){
+      saveEl.innerHTML = `<div class="card" style="padding:16px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--muted)">ULOŽIT DO JÍDELNÍČKU</div>
+        <input id="rec-final-name" class="inp" placeholder="Název jídla (Guláš, Smoothie…)" style="margin-bottom:8px"/>
+        <select id="rec-meal-sel" class="inp" style="margin-bottom:12px">
+          ${SLOTS.map(s=>'<option value="'+s+'"'+(s===activeSlot?' selected':'')+'>'+s+'</option>').join("")}
+        </select>
+        <button onclick="saveRecipe()" style="width:100%;padding:13px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border:none;border-radius:12px;color:#fff;font-weight:700;font-size:14px;cursor:pointer">
+          ✅ Přidat do jídelníčku
+        </button>
+      </div>`;
+    }
+  }
 }
 
 function removeRecipeItem(id){
