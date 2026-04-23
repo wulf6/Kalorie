@@ -138,6 +138,7 @@ input:focus,textarea:focus{scroll-margin-bottom:120px}
   <div style="font-size:72px;margin-bottom:16px">🍽</div>
   <div style="color:#fff;font-size:24px;font-weight:800;letter-spacing:1px">Kalorie AI</div>
   <div style="color:rgba(255,255,255,.7);font-size:14px;margin-top:8px">Načítám databázi…</div>
+  <div style="color:rgba(255,255,255,.5);font-size:11px;margin-top:4px" id="splash-status">připravuji…</div>
 </div>
 <div id="app"></div>
 
@@ -360,6 +361,8 @@ function getTypicalGrams(name){
 
 // Načtení databáze potravin
 async function loadFoodDB(){
+  const splashStatus = document.getElementById("splash-status");
+  if(splashStatus) splashStatus.textContent = "načítám databázi…";
   // Vymaž service worker cache pro db.json
   if(window.caches){
     try {
@@ -377,14 +380,19 @@ async function loadFoodDB(){
     const cacheVer = localStorage.getItem("food_db_cache_ver");
     if(cached && cacheTime && cacheVer === "2" && (Date.now()-parseInt(cacheTime)) < oneDay){
       Object.assign(FOOD_DB, JSON.parse(cached));
+      const count = Object.keys(FOOD_DB).length;
+      if(splashStatus) splashStatus.textContent = `z cache: ${count} položek`;
       return;
     }
   } catch(_){}
   try {
+    if(splashStatus) splashStatus.textContent = "stahuji db.json…";
     const r = await fetch("db.json?v="+Date.now(), {cache:"no-cache"});
     if(r.ok){
       const data = await r.json();
       Object.assign(FOOD_DB, data);
+      const count = Object.keys(FOOD_DB).length;
+      if(splashStatus) splashStatus.textContent = `načteno ${count} položek`;
       try {
         localStorage.setItem("food_db_cache", JSON.stringify(data));
         localStorage.setItem("food_db_cache_time", Date.now().toString());
@@ -394,17 +402,61 @@ async function loadFoodDB(){
     }
   } catch(e){
     console.warn("Nelze načíst db.json:", e.message);
+    if(splashStatus) splashStatus.textContent = "db.json nedostupná, záloha…";
   }
-  // Základní fallback DB
+  // Základní fallback DB (rozšířená – používá se když db.json není k dispozici)
   Object.assign(FOOD_DB, {
     "banan":["Banán",94,1.2,22,0.2,2],"jablko":["Jablko",62,0.4,13,0.4,3],
+    "hruska":["Hruška",58,0.4,12,0.1,3],"pomeranc":["Pomeranč",47,0.9,10,0.1,2],
+    "jahody":["Jahody",33,0.7,6,0.4,2],"boruvky":["Borůvky",46,0.7,10,0.3,2],
     "mrkev":["Mrkev",42,1,7,0.2,3],"brambory":["Brambory vařené",84,1.7,18,0.1,1],
+    "rajce":["Rajče",18,0.9,3.5,0.2,1],"uhorka":["Okurka",15,0.6,2.5,0.1,0.5],
+    "salat":["Salát ledový",14,1.2,1.8,0.2,1],"paprika":["Paprika červená",31,1,6,0.3,2],
+    "brokolice":["Brokolice",35,3,5,0.4,3],"cibule":["Cibule",40,1.1,7,0.1,1.8],
+    "cesnek":["Česnek",149,6.4,33,0.5,2],"zampiony":["Žampiony",22,3,3,0.3,1],
     "vejce":["Vejce",151,12,1,11,0],"kureci prsa":["Kuřecí prsa",106,23,0,1.5,0],
-    "rohlik":["Rohlík bílý",310,9.8,57,3.7,4],"chleb":["Chléb kmínový",244,8,45,1,4],
-    "sunka":["Šunka",118,19,0.5,4.5,0],"mleko":["Mléko",46,3.3,4.7,1.5,0],
-    "jogurt":["Jogurt bílý",71,4.3,4.5,3.4,0],"syr":["Sýr Eidam",323,30,0,22,0],
-    "ryze":["Rýže vařená",131,2.7,29,0.3,0],"testoviny":["Těstoviny vařené",154,5,29,1,2]
+    "kureci stehno":["Kuřecí stehno",211,18,0,15,0],"hovezi maso":["Hovězí maso",247,26,0,16,0],
+    "vepřove maso":["Vepřové maso",246,21,0,18,0],"losos":["Losos",208,20,0,14,0],
+    "treska":["Treska",82,18,0,0.7,0],"tunák":["Tuňák ve vlastní šťávě",116,26,0,1,0],
+    "krevety":["Krevety",99,21,0.9,1.7,0],"rohlik":["Rohlík bílý",310,9.8,57,3.7,4],
+    "chleb":["Chléb kmínový",244,8,45,1,4],"chléb celozrnný":["Chléb celozrnný",224,9,41,2,6],
+    "toust":["Toust bílý",277,9,50,3.5,2],"bageta":["Bageta",275,9,53,2,2],
+    "sunka":["Šunka",118,19,0.5,4.5,0],"klobasa":["Klobása",360,14,2,33,0],
+    "salami":["Salám",385,21,1.8,33,0],"slanina":["Slanina",541,37,0,42,0],
+    "mleko":["Mléko",46,3.3,4.7,1.5,0],"mleko tucne":["Mléko plnotučné",61,3.2,4.8,3.5,0],
+    "jogurt":["Jogurt bílý",71,4.3,4.5,3.4,0],"jogurt grécky":["Řecký jogurt",97,9,4,5,0],
+    "syr":["Sýr Eidam",323,30,0,22,0],"tvaroh":["Tvaroh nízkotučný",93,18,3.5,0.5,0],
+    "maslo":["Máslo",748,0.6,0.5,83,0],"smetana":["Smetana ke šlehání",345,2.3,3.3,36,0],
+    "vejce uvarene":["Vejce uvařené natvrdo",155,13,1.1,11,0],
+    "ryze":["Rýže vařená",131,2.7,29,0.3,0],"ryze bila":["Rýže bílá syrová",365,7,79,0.7,1],
+    "testoviny":["Těstoviny vařené",154,5,29,1,2],"testoviny celozrnne":["Těstoviny celozrnné vařené",140,5.5,25,1.5,4],
+    "cinska nudle":["Čínské nudle vařené",138,4.5,26,0.6,1],"kuskus":["Kuskus vařený",112,3.8,23,0.2,1.4],
+    "ovsene vlocky":["Ovesné vločky",371,13,58,7,10],"musli":["Müsli",380,10,65,7,7],
+    "cornflakes":["Cornflakes",379,7,85,0.8,3],"quinoa":["Quinoa vařená",120,4.4,21,1.9,2.8],
+    "cočka":["Čočka vařená",116,9,20,0.4,8],"fazole":["Fazole vařené",127,8.7,22,0.5,8],
+    "hrach":["Hrách vařený",118,8.3,21,0.4,5],"hummus":["Hummus",170,8,14,9,6],
+    "tofu":["Tofu",76,8,1.9,4.8,0.3],"arašídové máslo":["Arašídové máslo",588,25,20,50,6],
+    "mandle":["Mandle",575,21,22,50,12],"kešu":["Kešu ořechy",553,18,33,44,3],
+    "vlasske orechy":["Vlašské ořechy",654,15,14,65,7],"slunečnicová semínka":["Slunečnicová semínka",584,21,20,51,9],
+    "olivovy olej":["Olivový olej",884,0,0,100,0],"slunecnicový olej":["Slunečnicový olej",884,0,0,100,0],
+    "majoneza":["Majonéza",680,1,2,75,0],"kečup":["Kečup",105,1.7,25,0.1,1.5],
+    "mustard":["Hořčice",66,4,5,4,2],"med":["Med",304,0.3,82,0,0],
+    "cukor":["Cukr",400,0,100,0,0],"cokolada mlecna":["Čokoláda mléčná",535,8,59,30,4],
+    "cokolada horcka":["Čokoláda hořká 70%",598,8,46,41,11],"chips":["Chipsy",536,6,53,34,4],
+    "popcorn":["Popcorn bez másla",387,13,78,5,15],"pretzely":["Tyčinky",373,11,78,3,3],
+    "pizza margarita":["Pizza Margherita",265,11,33,10,2],"hamburger":["Hamburger",295,17,25,14,2],
+    "hranolky":["Hranolky",312,4,41,15,4],"hot dog":["Hot dog",290,11,29,15,1],
+    "susi":["Sushi (4 ks)",140,6,26,1,1],"spring roll":["Spring roll",136,3.5,20,5,1],
+    "avokado":["Avokádo",160,2,9,15,7],"hummus":["Hummus",170,8,14,9,6],
+    "cerna kava":["Černá káva",2,0.3,0,0,0],"cappuccino":["Cappuccino",74,4,6,3.5,0],
+    "latte":["Latte",67,3.7,7,2.8,0],"ovocny dzus":["Ovocný džus",46,0.4,11,0.1,0.2],
+    "cola":["Coca-Cola",42,0,10.6,0,0],"pivo":["Pivo světlé 10°",39,0.4,4,0,0],
+    "vino bila":["Víno bílé",82,0.1,2.6,0,0],"vino cervene":["Víno červené",85,0.1,2.6,0,0],
+    "protein shake":["Protein shake (whey)",400,80,7,4,0],"müsli tyčinka":["Müsli tyčinka",390,6,68,10,4],
+    "energy drink":["Energy drink",45,0,11,0,0],"zeleny caj":["Zelený čaj",1,0.2,0.2,0,0]
   });
+  const count = Object.keys(FOOD_DB).length;
+  if(splashStatus) splashStatus.textContent = `záložní DB: ${count} položek`;
 }
 
 const SLOTS = ["Snídaně","Svačina","Oběd","Svačina 2","Večeře"];
@@ -1672,7 +1724,7 @@ async function handleAiPhotoFromScan(base64Data){
   }
   
   try {
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
     const base64Content = base64Data.split(',')[1];
     const prompt = GEMINI_PROMPT + "\n\nNa fotce je čárový kód produktu, který se nepodařilo přečíst. Zkus identifikovat produkt podle obalu a odhadnout jeho nutriční hodnoty na 100g.";
     
@@ -1837,8 +1889,8 @@ async function handleAI(){
       if(!resp.ok){ const ed=await resp.json().catch(()=>({})); throw new Error(ed?.error?.message||"HTTP "+resp.status); }
       d = await resp.json();
     } else {
-      // Přímé volání - zkus více modelů
-      const models = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-1.5-flash-8b"];
+      // Přímé volání - zkus více modelů (seřazeno podle dostupnosti)
+      const models = ["gemini-1.5-flash","gemini-1.5-flash-8b","gemini-2.0-flash-lite","gemini-2.0-flash"];
       let lastErr = null;
       for(const model of models){
         try {
@@ -1846,9 +1898,10 @@ async function handleAI(){
           const resp = await fetch(url, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(geminiBody)});
           if(resp.status===404){ lastErr=new Error("model_not_found"); continue; }
           const data = await resp.json();
+          if(resp.status===400 && data?.error?.message?.includes("not found")){ lastErr=new Error("model_not_found"); continue; }
           if(resp.status>=400) throw new Error(data?.error?.message||"HTTP "+resp.status);
           d = data; break;
-        } catch(e){ lastErr=e; if(e.message==="model_not_found") continue; throw e; }
+        } catch(e){ lastErr=e; if(e.message==="model_not_found") continue; if(e.name==="TypeError") throw e; }
       }
       if(!d) throw lastErr||new Error("Gemini nedostupný");
     }
@@ -2549,7 +2602,17 @@ document.addEventListener("mousedown", e => {
 
 // ── Start ──// ── Start ─────────────────────────────────────────────────────────────────────
 if(profile.fontSize) applyFontSize(profile.fontSize);
-loadFoodDB().then(() => render());
+
+// Failsafe: skryj splash po 5s i když render selže
+setTimeout(()=>{
+  const splash = document.getElementById("splash");
+  if(splash && splash.style.display!=="none"){ splash.style.opacity=0; setTimeout(()=>splash.style.display="none",400); }
+}, 5000);
+
+loadFoodDB().then(() => render()).catch(err => {
+  console.error("Start error:", err);
+  render(); // pokus o render i při chybě
+});
 </script>
 <script>
 if("serviceWorker" in navigator){
