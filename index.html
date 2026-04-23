@@ -491,13 +491,12 @@ function normKey(s){
   return s.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9 ]/g,"").trim();
 }
 function lookupLocal(q){
-  const k = normKey(q);
+  if(!q) return null;
+  const k = dbKey(q);
   if(!k) return null;
   if(FOOD_DB[k]) return FOOD_DB[k];
-  // Přesná shoda na začátku (priorita)
   const startMatch = Object.entries(FOOD_DB).find(([key]) => key.startsWith(k));
   if(startMatch) return startMatch[1];
-  // Částečná shoda
   const found = Object.entries(FOOD_DB).find(([key]) => key.includes(k));
   return found ? found[1] : null;
 }
@@ -1339,13 +1338,99 @@ function removeIngFromEntry(entryId, ingIdx){
   render();
 }
 
+// ── Normalizace klíče konzistentní s parseCSVtoDB ────────────────────────────
+// DB klíče jsou BEZ mezer: "vodascitronem", "kureciprsa"
+// Vyhledávání musí používat stejný formát
+function dbKey(s){
+  return s.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]/g,"");
+}
+// normKey zachovává mezery – pro suggest (hledáme podřetězec)
+// dbKey odstraňuje vše mimo a-z0-9 – pro přesné vyhledávání v DB
+
+function lookupLocal(q){
+  if(!q) return null;
+  const k = dbKey(q);
+  if(!k) return null;
+  // 1. Přesná shoda
+  if(FOOD_DB[k]) return FOOD_DB[k];
+  // 2. Začíná hledaným řetězcem
+  const startMatch = Object.entries(FOOD_DB).find(([key]) => key.startsWith(k));
+  if(startMatch) return startMatch[1];
+  // 3. Obsahuje hledaný řetězec
+  const found = Object.entries(FOOD_DB).find(([key]) => key.includes(k));
+  return found ? found[1] : null;
+}
+
+function searchDB(q, limit=8){
+  if(!q || q.length < 1) return [];
+  const k = dbKey(q);
+  if(!k) return [];
+  // Priorita: začíná → obsahuje
+  const starts = [], contains = [];
+  for(const [key, val] of Object.entries(FOOD_DB)){
+    if(key.startsWith(k)) starts.push(val);
+    else if(key.includes(k)) contains.push(val);
+    if(starts.length + contains.length >= limit * 3) break;
+  }
+  return [...starts, ...contains].slice(0, limit);
+}
+
+// ── Manuální přidání – suggest ────────────────────────────────────────────────
+let _currentManualEntry = null;
+
+function onManualInput(){
+  const inp = document.getElementById("m-name");
+  if(!inp) return;
+  const q = inp.value.trim();
+  _currentManualEntry = null;
+  document.getElementById("m-autofill-info").style.display = "none";
+  if(q.length < 1){ hideGlobalSuggest(); return; }
+  const matches = searchDB(q, 10);
+  if(!matches.length){ hideGlobalSuggest(); return; }
+  showGlobalSuggest(inp, matches, (entry) => selectManualSug(entry));
+}
+
+function selectManualSug(entry){
+  _currentManualEntry = entry;
+  const inp = document.getElementById("m-name");
+  if(inp) inp.value = entry[0];
+  hideGlobalSuggest();
+  const gInp = document.getElementById("m-g");
+  const tg = getTypicalGrams(entry[0]);
+  if(gInp) gInp.value = tg;
+  fillManualFromEntry(entry, tg);
+}
+
+function fillManualFromEntry(entry, g){
+  const r = (parseFloat(g) || 100) / 100;
+  const set = (id, v) => { const el=document.getElementById(id); if(el) el.value=v; };
+  set("m-kcal", Math.round(entry[1]*r));
+  set("m-b",   (entry[2]*r).toFixed(1));
+  set("m-s",   (entry[3]*r).toFixed(1));
+  set("m-t",   (entry[4]*r).toFixed(1));
+  set("m-vl",  ((entry[5]||0)*r).toFixed(1));
+  const info = document.getElementById("m-autofill-info");
+  if(info){ info.textContent = "✓ Načteno z databáze · uprav porci dle potřeby"; info.style.display = "block"; }
+}
+
+function onManualGrams(){
+  if(!_currentManualEntry) return;
+  const g = parseFloat(document.getElementById("m-g")?.value) || 100;
+  fillManualFromEntry(_currentManualEntry, g);
+}
+
+function onManualKey(ev){
+  if(ev.key === "Escape"){ hideGlobalSuggest(); return; }
+  if(ev.key === "Enter"){ ev.preventDefault(); hideGlobalSuggest(); handleManual(); }
+}
+
 // ── Inline ingredient suggest ─────────────────────────────────────────────────
 let _inlineMatches = {};
 
 function onInlineIngInput(inp, entryId){
-  const q = normKey(inp.value);
-  if(q.length < 2){ hideGlobalSuggest(); return; }
-  const matches = Object.entries(FOOD_DB).filter(([k])=>k.includes(q)).slice(0,8).map(([,e])=>e);
+  const q = dbKey(inp.value);
+  if(q.length < 1){ hideGlobalSuggest(); return; }
+  const matches = searchDB(inp.value, 10);
   showGlobalSuggest(inp, matches, (entry) => {
     const nameInp = document.getElementById("add-ing-name-"+entryId);
     const gInp = document.getElementById("add-ing-g-"+entryId);
@@ -1622,9 +1707,10 @@ function removeEditorIng(id){
 
 function onEditorIngInput(){
   const inp = document.getElementById("editor-ing-name");
-  const q = normKey(inp.value);
-  if(q.length < 2){ hideGlobalSuggest(); _editorMatches=[]; return; }
-  _editorMatches = Object.entries(FOOD_DB).filter(([k])=>k.includes(q)).slice(0,8).map(([,e])=>e);
+  if(!inp) return;
+  if(inp.value.trim().length < 1){ hideGlobalSuggest(); _editorMatches=[]; return; }
+  _editorMatches = searchDB(inp.value, 10);
+  if(!_editorMatches.length){ hideGlobalSuggest(); return; }
   showGlobalSuggest(inp, _editorMatches, (entry) => selectEditorIng(entry));
 }
 function selectEditorIng(entry){
@@ -1698,9 +1784,9 @@ let _aiMatches = [];
 
 function onAiInput(){
   const inp = document.getElementById("ai-input");
-  const q = normKey(inp.value);
-  if(q.length < 2){ hideGlobalSuggest(); return; }
-  const matches = Object.entries(FOOD_DB).filter(([k])=>k.includes(q)).slice(0,8).map(([,e])=>e);
+  const q = dbKey(inp.value);
+  if(q.length < 1){ hideGlobalSuggest(); return; }
+  const matches = searchDB(inp.value, 10);
   showGlobalSuggest(inp, matches, (entry) => {
     inp.value = entry[0];
     hideGlobalSuggest();
@@ -1940,9 +2026,9 @@ async function handleAI(){
 // ── Recept ────────────────────────────────────────────────────────────────────
 function onRecInput(){
   const inp = document.getElementById("rec-name"); if(!inp) return;
-  const q = normKey(inp.value);
-  if(q.length < 2){ hideGlobalSuggest(); return; }
-  const matches = Object.entries(FOOD_DB).filter(([k])=>k.includes(q)).slice(0,8).map(([,e])=>e);
+  const q = dbKey(inp.value);
+  if(q.length < 1){ hideGlobalSuggest(); return; }
+  const matches = searchDB(inp.value, 10);
   showGlobalSuggest(inp, matches, (entry) => {
     inp.value = entry[0];
     const gInp = document.getElementById("rec-gram");
@@ -2085,6 +2171,68 @@ async function lookupBarcode(code){
 }
 function openScanner(){ document.getElementById("scan-file-inp").click(); }
 function closeScanner(){ document.getElementById("scanner").style.display="none"; }
+
+// ── Globální suggest (autocomplete dropdown) ──────────────────────────────────
+let _sugCallback = null;
+
+function showGlobalSuggest(inputEl, items, onSelect){
+  if(!items || !items.length){ hideGlobalSuggest(); return; }
+  _sugCallback = onSelect;
+
+  let sug = document.getElementById("g-suggest");
+  if(!sug){
+    sug = document.createElement("div");
+    sug.id = "g-suggest";
+    sug.style.cssText = "position:fixed;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.25);z-index:10000;max-height:260px;overflow-y:auto;-webkit-overflow-scrolling:touch";
+    document.body.appendChild(sug);
+  }
+
+  const rect = inputEl.getBoundingClientRect();
+  const spaceBelow = window.innerHeight - rect.bottom - 8;
+  const spaceAbove = rect.top - 8;
+  const height = Math.min(260, Math.max(80, spaceBelow > 120 ? spaceBelow : spaceAbove));
+  const top = spaceBelow > 120 ? rect.bottom + 4 : rect.top - height - 4;
+
+  sug.style.top    = top + "px";
+  sug.style.left   = Math.max(8, rect.left) + "px";
+  sug.style.width  = rect.width + "px";
+  sug.style.maxHeight = height + "px";
+  sug.style.display = "block";
+
+  sug.innerHTML = items.map((e, i) => `
+    <div data-idx="${i}" style="padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:14px;transition:background .1s"
+         onmouseenter="this.style.background='var(--surface)'" onmouseleave="this.style.background=''">
+      <span style="font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e[0]}</span>
+      <span style="color:var(--muted);font-size:12px;flex-shrink:0">${Math.round(e[1])} kcal/100g</span>
+    </div>`).join("");
+
+  sug.querySelectorAll("[data-idx]").forEach(el => {
+    const pick = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      hideGlobalSuggest();
+      if(_sugCallback) _sugCallback(items[+el.dataset.idx]);
+    };
+    el.addEventListener("mousedown", pick);
+    el.addEventListener("touchend", pick, { passive: false });
+  });
+}
+
+function hideGlobalSuggest(){
+  const sug = document.getElementById("g-suggest");
+  if(sug) sug.style.display = "none";
+  _sugCallback = null;
+}
+
+// Zavři suggest při kliknutí mimo
+document.addEventListener("mousedown", e => {
+  const sug = document.getElementById("g-suggest");
+  if(sug && sug.style.display !== "none" && !sug.contains(e.target)) hideGlobalSuggest();
+}, true);
+document.addEventListener("touchstart", e => {
+  const sug = document.getElementById("g-suggest");
+  if(sug && sug.style.display !== "none" && !sug.contains(e.target)) hideGlobalSuggest();
+}, { passive: true });
 
 // ── Spuštění ──────────────────────────────────────────────────────────────────
 setTimeout(()=>{ const s=document.getElementById("splash"); if(s&&s.style.display!=="none"){ s.style.opacity=0; setTimeout(()=>s.style.display="none",400); } },5000);
