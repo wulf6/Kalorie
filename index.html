@@ -15,7 +15,7 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;overscroll-behavior:none;font-family:system-ui,-apple-system,sans-serif}
-/* Globální velikost písma – bude měněna pomocí CSS proměnné */
+/* Velikost písma se mění pomocí proměnné */
 :root{ --base-font-size: 1rem; }
 body{font-size:var(--base-font-size);background:var(--bg);color:var(--text);transition:background .3s,color .3s}
 button,input,select,textarea{font-family:inherit}
@@ -258,10 +258,9 @@ async function loadFoodDB() {
   const splashStatus = document.getElementById("splash-status");
   if(splashStatus) splashStatus.textContent = "načítám databázi…";
   
-  // Nejprve zkusíme cache
   try {
-    const cached = localStorage.getItem("food_db_cache_v7");
-    const cacheTime = localStorage.getItem("food_db_cache_time_v7");
+    const cached = localStorage.getItem("food_db_cache_v8");
+    const cacheTime = localStorage.getItem("food_db_cache_time_v8");
     const oneDay = 24*60*60*1000;
     if(cached && cacheTime && (Date.now()-parseInt(cacheTime)) < oneDay) {
       const data = JSON.parse(cached);
@@ -272,7 +271,6 @@ async function loadFoodDB() {
     }
   } catch(e) {}
   
-  // Načtení CSV z db.json
   try {
     if(splashStatus) splashStatus.textContent = "stahuji db.json (CSV)…";
     const response = await fetch("db.json?v=" + Date.now(), { cache: "no-cache" });
@@ -331,8 +329,8 @@ async function loadFoodDB() {
     if(Object.keys(newDB).length > 0) {
       Object.assign(FOOD_DB, newDB);
       try {
-        localStorage.setItem("food_db_cache_v7", JSON.stringify(newDB));
-        localStorage.setItem("food_db_cache_time_v7", Date.now().toString());
+        localStorage.setItem("food_db_cache_v8", JSON.stringify(newDB));
+        localStorage.setItem("food_db_cache_time_v8", Date.now().toString());
       } catch(e) {}
       const count = Object.keys(FOOD_DB).length;
       if(splashStatus) splashStatus.textContent = `načteno ${count} položek`;
@@ -344,7 +342,6 @@ async function loadFoodDB() {
     if(splashStatus) splashStatus.textContent = "chyba načítání, používám záložní DB…";
   }
   
-  // Záložní databáze
   Object.assign(FOOD_DB, {
     "banan":["Banán",94,1.2,22,0.2,2],
     "jablko":["Jablko",62,0.4,13,0.4,3],
@@ -407,7 +404,7 @@ async function callGemini(key, prompt, imageBase64 = null, imageMime = "image/jp
   throw lastError || new Error("Žádný Gemini model není dostupný");
 }
 
-// ======================== ZBYTEK APLIKACE (PLNÁ FUNKCIONALITA) ========================
+// ======================== ZBYTEK APLIKACE ========================
 const SLOTS = ["Snídaně","Svačina","Oběd","Svačina 2","Večeře"];
 const GEMINI_PROMPT = `Odpověz POUZE tímto JSON formátem bez jakéhokoli dalšího textu nebo markdown:
 {"jidlo":"Název česky","porce_g":100,"kcal":100,"b":10,"s":10,"t":5,"vl":2}
@@ -532,7 +529,7 @@ async function handleAI(){
 }
 function onAiInput(){}
 
-// ======================== MOJE JÍDLA (SPRÁVNĚ FUNGUJÍCÍ) ========================
+// ======================== MOJE JÍDLA ========================
 let editorIngredients = [];
 let editorEditIdx = null;
 
