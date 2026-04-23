@@ -548,6 +548,7 @@ function render(){
       </div>
 
       <!-- Seznam složek -->
+      <div id="recipe-list"></div>
       ${recipe.length>0?`
       <div class="card" style="padding:16px;margin-bottom:12px">
         <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--muted)">SLOŽENÍ</div>
@@ -567,6 +568,7 @@ function render(){
       </div>` : ""}
 
       <!-- Uložit -->
+      <div id="recipe-save" style="${recipe.length?'':'display:none'}">
       ${recipe.length>0?`
       <div class="card" style="padding:16px">
         <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--muted)">ULOŽIT DO JÍDELNÍČKU</div>
@@ -946,6 +948,13 @@ function render(){
           🤖 <b>Gemini AI</b> – analýza jídel volným textem<br>
           📷 <b>Čárové kódy</b> – zdarma bez klíče (Open Food Facts)<br>
           ✏️ <b>Databáze + ruční zadání</b> – vždy zdarma
+        </div>
+        <!-- DB status -->
+        <div style="padding:10px 14px;background:${Object.keys(FOOD_DB).length>100?'#f0fdf4':'#fef9ec'};border:1px solid ${Object.keys(FOOD_DB).length>100?'#bbf7d0':'#fde68a'};border-radius:10px;font-size:13px">
+          ${Object.keys(FOOD_DB).length>100
+            ?'✅ Databáze: <b>'+Object.keys(FOOD_DB).length+'</b> potravin načteno'
+            :'⚠️ Databáze se načítá… ('+Object.keys(FOOD_DB).length+' položek)'}
+          <button onclick="localStorage.removeItem('food_db_cache');localStorage.removeItem('food_db_cache_ver');loadFoodDB().then(render)" style="float:right;background:transparent;border:none;color:#6366f1;font-size:11px;cursor:pointer;font-weight:600">🔄 Znovu načíst</button>
         </div>
 
         <!-- Stav klíče -->
@@ -1797,8 +1806,6 @@ async function handleAI(){
 
   try{
     const g = parseFloat(document.getElementById("ai-g").value)||100;
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
-
     // Build parts: optional image + text
     const parts = [];
     if(_photoBase64){
@@ -1806,26 +1813,35 @@ async function handleAI(){
     }
     const textPrompt = GEMINI_PROMPT+"\n\n"+(txt ? "Jídlo/porce: "+txt : "Analyzuj jídlo na fotce")+(g!==100?" (porce "+g+"g)":"");
     parts.push({text: textPrompt});
+    const geminiBody = {contents:[{parts}]};
 
-    const body = JSON.stringify({contents:[{parts}]});
-
-    // XMLHttpRequest - lépe funguje na Androidu/mobile
-    const d = await new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", geminiUrl);
-      xhr.setRequestHeader("Content-Type", "application/json");
-      xhr.timeout = 20000;
-      xhr.onload = () => {
+    let d;
+    const proxyUrl = profile.proxyUrl;
+    if(proxyUrl){
+      // Přes Cloudflare Worker proxy
+      const resp = await fetch(proxyUrl, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({key, body: geminiBody})
+      });
+      if(!resp.ok){ const ed=await resp.json().catch(()=>({})); throw new Error(ed?.error?.message||"HTTP "+resp.status); }
+      d = await resp.json();
+    } else {
+      // Přímé volání - zkus více modelů
+      const models = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-1.5-flash-8b"];
+      let lastErr = null;
+      for(const model of models){
         try {
-          const data = JSON.parse(xhr.responseText);
-          if(xhr.status >= 400) reject(new Error(data?.error?.message || "HTTP "+xhr.status));
-          else resolve(data);
-        } catch(e) { reject(new Error("Chyba parsování odpovědi")); }
-      };
-      xhr.onerror = () => reject(new Error("Síťová chyba – zkontroluj internet a API klíč na aistudio.google.com/apikey"));
-      xhr.ontimeout = () => reject(new Error("Vypršel časový limit – Gemini neodpovídá"));
-      xhr.send(body);
-    });
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+          const resp = await fetch(url, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(geminiBody)});
+          if(resp.status===404){ lastErr=new Error("model_not_found"); continue; }
+          const data = await resp.json();
+          if(resp.status>=400) throw new Error(data?.error?.message||"HTTP "+resp.status);
+          d = data; break;
+        } catch(e){ lastErr=e; if(e.message==="model_not_found") continue; throw e; }
+      }
+      if(!d) throw lastErr||new Error("Gemini nedostupný");
+    }
     const raw = (d.candidates?.[0]?.content?.parts?.[0]?.text||"").replace(/```json|```/g,"").trim();
     if(!raw) throw new Error("Prázdná odpověď od AI");
     const parsed = JSON.parse(raw);
@@ -2165,12 +2181,41 @@ function addRecipeItem(){
   recipe.push({ id:Date.now()+Math.random(), j:entry[0]||name, g, k:entry[1]*r, b:entry[2]*r, s:entry[3]*r, t:entry[4]*r, vl:entry[5]*r, isWater:isLiquid(name) });
   nameEl.value="";
   gramEl.value=100;
-  render();
+  hideGlobalSuggest();
+  renderRecipeList(); // aktualizuj jen seznam, ne celou stránku
+}
+
+function renderRecipeList(){
+  const listEl = document.getElementById("recipe-list");
+  const saveEl = document.getElementById("recipe-save");
+  if(!listEl) { render(); return; } // fallback
+  const rTot = recipe.reduce((a,i)=>({k:a.k+i.k,b:a.b+i.b,s:a.s+i.s,t:a.t+i.t,g:a.g+i.g}),{k:0,b:0,s:0,t:0,g:0});
+  if(!recipe.length){
+    listEl.innerHTML = "";
+    if(saveEl) saveEl.style.display = "none";
+    return;
+  }
+  listEl.innerHTML = `<div class="card" style="padding:16px;margin-bottom:12px">
+    <div style="font-weight:700;font-size:13px;margin-bottom:10px;color:var(--muted)">SLOŽENÍ</div>
+    ${recipe.map(i=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+        <div>
+          <div style="font-weight:600;font-size:14px">${i.j}</div>
+          <div style="font-size:12px;color:var(--muted)">${i.g}g · ${Math.round(i.k)} kcal</div>
+        </div>
+        <button onclick="removeRecipeItem(${i.id})" style="background:#fef2f2;border:none;color:#ef4444;padding:4px 10px;border-radius:8px;cursor:pointer">×</button>
+      </div>`).join("")}
+    <div style="display:flex;justify-content:space-between;margin-top:10px;padding-top:8px;border-top:2px solid var(--border)">
+      <span style="font-weight:700">Celkem</span>
+      <span style="font-weight:800;color:#f97316">${Math.round(rTot.k)} kcal | B:${rTot.b.toFixed(1)} S:${rTot.s.toFixed(1)} T:${rTot.t.toFixed(1)}g</span>
+    </div>
+  </div>`;
+  if(saveEl) saveEl.style.display = "block";
 }
 
 function removeRecipeItem(id){
   recipe = recipe.filter(i=>i.id!==id);
-  render();
+  renderRecipeList();
 }
 
 function saveRecipe(){
