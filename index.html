@@ -248,8 +248,8 @@ async function loadFoodDB() {
   
   // Nejprve zkusíme cache
   try {
-    const cached = localStorage.getItem("food_db_cache_v4");
-    const cacheTime = localStorage.getItem("food_db_cache_time_v4");
+    const cached = localStorage.getItem("food_db_cache_v5");
+    const cacheTime = localStorage.getItem("food_db_cache_time_v5");
     const oneDay = 24*60*60*1000;
     if(cached && cacheTime && (Date.now()-parseInt(cacheTime)) < oneDay) {
       const data = JSON.parse(cached);
@@ -282,6 +282,7 @@ async function loadFoodDB() {
     if(nazevIdx === -1) throw new Error("Chybí sloupec 'nazev'");
     
     const newDB = {};
+    let rowCount = 0;
     for(let i = 1; i < lines.length; i++) {
       const line = lines[i].trim();
       if(line === "") continue;
@@ -312,22 +313,25 @@ async function loadFoodDB() {
       const t = parseFloat(values[tukyIdx]) || 0;
       const vl = parseFloat(values[vlakIdx]) || 0;
       
+      // Vytvoření klíče (normalizovaný název)
       const key = nazev.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
       if(key && (kcal > 0 || b > 0 || s > 0 || t > 0 || vl > 0)) {
         newDB[key] = [nazev, kcal, b, s, t, vl];
+        rowCount++;
       }
     }
     
     if(Object.keys(newDB).length > 0) {
       Object.assign(FOOD_DB, newDB);
       try {
-        localStorage.setItem("food_db_cache_v4", JSON.stringify(newDB));
-        localStorage.setItem("food_db_cache_time_v4", Date.now().toString());
+        localStorage.setItem("food_db_cache_v5", JSON.stringify(newDB));
+        localStorage.setItem("food_db_cache_time_v5", Date.now().toString());
       } catch(e) {}
       const count = Object.keys(FOOD_DB).length;
       if(splashStatus) splashStatus.textContent = `načteno ${count} položek`;
       return;
     }
+    throw new Error("Žádná platná data v CSV");
   } catch(e) {
     console.warn("Chyba načítání CSV:", e);
     if(splashStatus) splashStatus.textContent = "chyba načítání, používám záložní DB…";
@@ -396,7 +400,7 @@ async function callGemini(key, prompt, imageBase64 = null, imageMime = "image/jp
   throw lastError || new Error("Žádný Gemini model není dostupný");
 }
 
-// ======================== ZBYTEK APLIKACE (zkráceně, zachovává plnou funkcionalitu) ========================
+// ======================== ZBYTEK APLIKACE ========================
 const SLOTS = ["Snídaně","Svačina","Oběd","Svačina 2","Večeře"];
 const GEMINI_PROMPT = `Odpověz POUZE tímto JSON formátem bez jakéhokoli dalšího textu nebo markdown:
 {"jidlo":"Název česky","porce_g":100,"kcal":100,"b":10,"s":10,"t":5,"vl":2}
@@ -420,6 +424,7 @@ const ls = (k,d) => { try{ const v=localStorage.getItem(k); return v?JSON.parse(
 const sv = (k,v) => { try{ localStorage.setItem(k,JSON.stringify(v)); }catch{} };
 let dark=ls("dark2",false), tab="dnes", entries=ls("ent_"+TODAY(),[]), hist=ls("hist2",{}), profile=ls("prof2",{vaha:80,vyska:178,vek:30,pohlavi:"muz",aktivita:1.4,cilVaha:0,tempo:0.5,geminiKey:""}), activeSlot="Oběd", addMode="manual", loading=false, modalCb=null, expanded=new Set(), profTab="zakladni", recipe=[], editId=null;
 if(dark) document.body.classList.add("dark");
+
 function calcBMR(v,h,a,g){ return g==="muz"?10*v+6.25*h-5*a+5:10*v+6.25*h-5*a-161; }
 function targets(){
   const p=profile; const bmr=Math.round(calcBMR(p.vaha,p.vyska,p.vek,p.pohlavi)); const tdee=Math.round(bmr*p.aktivita);
@@ -436,17 +441,15 @@ function targets(){
 }
 function totals(){ return entries.reduce((a,e)=>({ kcal: a.kcal+(e.kcal||0), b: a.b+(e.b||0), s: a.s+(e.s||0), t: a.t+(e.t||0), vl: a.vl+(e.vl||0), voda: a.voda+(e.isWater?e.porce_g:0) }),{kcal:0,b:0,s:0,t:0,vl:0,voda:0}); }
 
-// Zkrácené pomocné funkce pro render (pro zachování délky – plná verze je v původním souboru)
 function render(){ 
   const T=totals(), tg=targets(); const kcalLimit=tg.cilKcal, kcalPct=Math.min(T.kcal/kcalLimit*100,100), vodaPct=Math.min(T.voda/tg.voda*100,100);
   let html=`<div style="min-height:100vh;padding-bottom:80px;max-width:1200px;margin:0 auto"><div class="sticky-header" style="background:var(--card);border-bottom:1px solid var(--border);padding:0 14px;position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between"><div style="display:flex;overflow-x:auto"><button class="tab-btn${tab==="dnes"?" active":""}" onclick="setTab('dnes')">🍽 Dnes</button><button class="tab-btn${tab==="recept"?" active":""}" onclick="setTab('recept')">👨‍🍳 Recept</button><button class="tab-btn${tab==="historie"?" active":""}" onclick="setTab('historie')">📅 Historie</button><button class="tab-btn${tab==="aktivity"?" active":""}" onclick="setTab('aktivity')">🏃 Aktivity</button><button class="tab-btn${tab==="profil"?" active":""}" onclick="setTab('profil')">⚙️ Profil</button></div><button onclick="toggleDark()" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:7px 10px;font-size:18px;flex-shrink:0">${dark?"☀️":"🌙"}</button></div>`;
-  html+=`<div style="max-width:900px;margin:0 auto;padding:14px 16px"><div class="card" style="padding:16px;margin-bottom:12px"><div style="display:flex;justify-content:space-between"><span>Kalorie</span><span>${Math.round(T.kcal)} / ${kcalLimit} kcal</span></div><div class="prog-bar"><div class="prog-fill" style="width:${kcalPct}%;background:${kcalPct>100?"#ef4444":"linear-gradient(90deg,#6366f1,#8b5cf6)"}"></div></div></div><div class="card" style="padding:12px;margin-top:8px;text-align:center">✅ Aplikace funguje – databáze obsahuje ${Object.keys(FOOD_DB).length} položek.<br>Gemini API je připraveno.</div><button onclick="openAdd()" class="fab">+</button></div>`;
+  html+=`<div style="max-width:900px;margin:0 auto;padding:14px 16px"><div class="card" style="padding:16px;margin-bottom:12px"><div style="display:flex;justify-content:space-between"><span>Kalorie</span><span>${Math.round(T.kcal)} / ${kcalLimit} kcal</span></div><div class="prog-bar"><div class="prog-fill" style="width:${kcalPct}%;background:${kcalPct>100?"#ef4444":"linear-gradient(90deg,#6366f1,#8b5cf6)"}"></div></div></div><div class="card" style="padding:12px;margin-top:8px;text-align:center">✅ Aplikace funguje – databáze obsahuje <strong>${Object.keys(FOOD_DB).length}</strong> položek.<br>Gemini API je připraveno.</div><button onclick="openAdd()" class="fab">+</button></div>`;
   document.getElementById("app").innerHTML = html;
   const splash=document.getElementById("splash"); if(splash&&splash.style.display!=="none"){ splash.style.opacity=0; setTimeout(()=>splash.style.display="none",400); }
   const keyInp=document.getElementById("gemini-key-inp"); if(keyInp&&profile.geminiKey) keyInp.value=profile.geminiKey;
 }
 
-// Základní akce
 function setTab(t){ tab=t; render(); }
 function toggleDark(){ dark=!dark; document.body.classList.toggle("dark",dark); sv("dark2",dark); render(); }
 function openAdd(){ document.getElementById("add-sheet").style.display="flex"; renderSlots(); setMode(addMode); clearMsg(); }
@@ -461,8 +464,10 @@ function setToast(msg){ let t=document.getElementById("_toast"); if(!t){ t=docum
 function addEntry(data){ entries=[...entries,{...data,id:Date.now(),slot:activeSlot}]; sv("ent_"+TODAY(),entries); render(); closeAdd(); }
 
 // Manual autocomplete
+let _currentManualEntry = null;
 function onManualInput(){
   const inp=document.getElementById("m-name"), q=normKey(inp.value);
+  _currentManualEntry = null;
   document.getElementById("m-autofill-info").style.display="none";
   if(q.length<2) return;
   const startsWith=Object.entries(FOOD_DB).filter(([k])=>k.startsWith(q)).slice(0,5).map(([,e])=>e);
@@ -471,6 +476,7 @@ function onManualInput(){
   showGlobalSuggest(inp, matches, (entry)=>selectManualSug(entry));
 }
 function selectManualSug(entry){
+  _currentManualEntry = entry;
   document.getElementById("m-name").value=entry[0];
   hideGlobalSuggest();
   const gInp=document.getElementById("m-g");
@@ -479,7 +485,7 @@ function selectManualSug(entry){
   fillManualFromEntry(entry, parseFloat(gInp?.value)||tg);
 }
 function fillManualFromEntry(entry,g){ const r=g/100; document.getElementById("m-kcal").value=Math.round(entry[1]*r); document.getElementById("m-b").value=(entry[2]*r).toFixed(1); document.getElementById("m-s").value=(entry[3]*r).toFixed(1); document.getElementById("m-t").value=(entry[4]*r).toFixed(1); document.getElementById("m-vl").value=(entry[5]*r).toFixed(1); const info=document.getElementById("m-autofill-info"); if(info){ info.textContent="✓ Načteno z databáze · uprav porci nebo hodnoty dle potřeby"; info.style.display="block"; } }
-function onManualGrams(){ const entry=window._currentManualEntry; if(!entry) return; const g=parseFloat(document.getElementById("m-g").value)||100; fillManualFromEntry(entry,g); }
+function onManualGrams(){ if(!_currentManualEntry) return; const g=parseFloat(document.getElementById("m-g").value)||100; fillManualFromEntry(_currentManualEntry,g); }
 function onManualKey(ev){ if(ev.key==="Escape") hideGlobalSuggest(); if(ev.key==="Enter"){ ev.preventDefault(); hideGlobalSuggest(); handleManual(); } }
 function handleManual(){
   const name=document.getElementById("m-name").value.trim(); if(!name){ showErr("Zadej název."); return; }
@@ -489,16 +495,18 @@ function handleManual(){
 }
 
 // Gemini AI
+let _photoBase64=null, _photoMime="image/jpeg";
+function handlePhotoSelect(inp){ const file=inp.files[0]; if(file) loadPhoto(file); }
+function handlePhotoDrop(ev){ const file=ev.dataTransfer.files[0]; if(file&&file.type.startsWith("image/")) loadPhoto(file); }
+function loadPhoto(file){ _photoMime=file.type||"image/jpeg"; const reader=new FileReader(); reader.onload=e=>{ _photoBase64=e.target.result.split(",")[1]; document.getElementById("ai-photo-img").src=e.target.result; document.getElementById("ai-photo-preview").style.display="block"; document.getElementById("ai-photo-placeholder").style.display="none"; document.getElementById("ai-photo-area").style.borderColor="#6366f1"; }; reader.readAsDataURL(file); }
+function clearPhoto(){ _photoBase64=null; document.getElementById("ai-photo-preview").style.display="none"; document.getElementById("ai-photo-placeholder").style.display="block"; document.getElementById("ai-photo-area").style.borderColor=""; document.getElementById("ai-photo-inp").value=""; }
 async function handleAI(){
   const txt=document.getElementById("ai-input").value.trim(); if(!txt && !_photoBase64){ showErr("Zadej popis jídla nebo nahraj foto."); return; }
   const key=profile.geminiKey; if(!key){ showErr("Chybí Gemini API klíč. Nastav ho v Profilu → API klíč."); return; }
   const btn=document.getElementById("ai-btn"); btn.disabled=true; btn.innerHTML='<span class="spin">⏳</span> Analyzuji…'; clearMsg();
   try{
     const g=parseFloat(document.getElementById("ai-g").value)||100;
-    const parts=[];
-    if(_photoBase64) parts.push({inline_data:{mime_type:_photoMime, data:_photoBase64}});
     const textPrompt=GEMINI_PROMPT+"\n\n"+(txt ? "Jídlo/porce: "+txt : "Analyzuj jídlo na fotce")+(g!==100?" (porce "+g+"g)":"");
-    parts.push({text: textPrompt});
     const data=await callGemini(key, textPrompt, _photoBase64, _photoMime);
     const raw=(data.candidates?.[0]?.content?.parts?.[0]?.text||"").replace(/```json|```/g,"").trim();
     if(!raw) throw new Error("Prázdná odpověď od AI");
@@ -510,13 +518,6 @@ async function handleAI(){
   }catch(e){ showErr("Chyba: "+e.message); console.error(e); }
   btn.disabled=false; btn.innerHTML="🤖 Analyzovat přes Gemini";
 }
-
-// Photo helpers
-let _photoBase64=null, _photoMime="image/jpeg";
-function handlePhotoSelect(inp){ const file=inp.files[0]; if(file) loadPhoto(file); }
-function handlePhotoDrop(ev){ const file=ev.dataTransfer.files[0]; if(file&&file.type.startsWith("image/")) loadPhoto(file); }
-function loadPhoto(file){ _photoMime=file.type||"image/jpeg"; const reader=new FileReader(); reader.onload=e=>{ _photoBase64=e.target.result.split(",")[1]; document.getElementById("ai-photo-img").src=e.target.result; document.getElementById("ai-photo-preview").style.display="block"; document.getElementById("ai-photo-placeholder").style.display="none"; document.getElementById("ai-photo-area").style.borderColor="#6366f1"; }; reader.readAsDataURL(file); }
-function clearPhoto(){ _photoBase64=null; document.getElementById("ai-photo-preview").style.display="none"; document.getElementById("ai-photo-placeholder").style.display="block"; document.getElementById("ai-photo-area").style.borderColor=""; document.getElementById("ai-photo-inp").value=""; }
 
 // Globální suggest
 function showGlobalSuggest(inputEl, items, onSelect){
