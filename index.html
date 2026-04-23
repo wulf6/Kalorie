@@ -1962,10 +1962,10 @@ function clearPhoto(){
 
 // ── AI (Gemini) ───────────────────────────────────────────────────────────────
 const GEMINI_MODELS = [
-  "gemini-1.5-flash",
-  "gemini-1.5-flash-8b",
-  "gemini-2.0-flash-exp",
-  "gemini-2.0-flash"
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash"
 ];
 
 async function callGemini(key, prompt, imageBase64=null, imageMime="image/jpeg"){
@@ -2210,8 +2210,9 @@ function showGlobalSuggest(inputEl, items, onSelect){
     const pick = (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
+      const cb = _sugCallback;   // uložíme před hideGlobalSuggest, která _sugCallback nulluje
       hideGlobalSuggest();
-      if(_sugCallback) _sugCallback(items[+el.dataset.idx]);
+      if(cb) cb(items[+el.dataset.idx]);
     };
     el.addEventListener("mousedown", pick);
     el.addEventListener("touchend", pick, { passive: false });
