@@ -359,13 +359,14 @@ function getTypicalGrams(name){
   return bestMatch !== null ? bestMatch : 100;
 }
 
-// Načtení databáze potravin
+// Načtení databáze potravin (db.json je ve skutečnosti CSV soubor)
 async function loadFoodDB(){
   const splashStatus = document.getElementById("splash-status");
 
+  // Cache
   try {
-    const cached = localStorage.getItem("food_db_cache_v8");
-    const cacheTime = localStorage.getItem("food_db_cache_time_v8");
+    const cached = localStorage.getItem("food_db_cache_v9");
+    const cacheTime = localStorage.getItem("food_db_cache_time_v9");
     const oneDay = 24*60*60*1000;
     if(cached && cacheTime && (Date.now()-parseInt(cacheTime)) < oneDay){
       Object.assign(FOOD_DB, JSON.parse(cached));
@@ -374,32 +375,98 @@ async function loadFoodDB(){
     }
   } catch(_){}
 
+  // Stažení souboru
   try {
     if(splashStatus) splashStatus.textContent = "stahuji databázi…";
     const response = await fetch("db.json?v="+Date.now(), { cache:"no-cache" });
     if(!response.ok) throw new Error("HTTP "+response.status);
-    const data = await response.json();
-    Object.assign(FOOD_DB, data);
-    try {
-      localStorage.setItem("food_db_cache_v8", JSON.stringify(data));
-      localStorage.setItem("food_db_cache_time_v8", Date.now().toString());
-    } catch(_){}
-    if(splashStatus) splashStatus.textContent = Object.keys(FOOD_DB).length+" položek načteno";
-    return;
+    const text = await response.text();
+
+    const newDB = parseCSVtoDB(text);
+    const count = Object.keys(newDB).length;
+
+    if(count > 0){
+      Object.assign(FOOD_DB, newDB);
+      try {
+        localStorage.setItem("food_db_cache_v9", JSON.stringify(newDB));
+        localStorage.setItem("food_db_cache_time_v9", Date.now().toString());
+      } catch(_){}
+      if(splashStatus) splashStatus.textContent = count+" položek načteno";
+      return;
+    }
+    throw new Error("Žádná platná data");
   } catch(e){
     console.warn("Nelze načíst db.json:", e.message);
-    if(splashStatus) splashStatus.textContent = "chyba: "+e.message;
+    if(splashStatus) splashStatus.textContent = "záložní DB…";
   }
 
-  // Fallback
+  // Fallback mini-DB
   Object.assign(FOOD_DB, {
     "banan":["Banán",94,1.2,22,0.2,2],"jablko":["Jablko",62,0.4,13,0.4,3],
     "mrkev":["Mrkev",42,1,7,0.2,3],"brambory":["Brambory vařené",84,1.7,18,0.1,1],
-    "vejce":["Vejce",151,12,1,11,0],"kureci prsa":["Kuřecí prsa",106,23,0,1.5,0],
+    "vejce":["Vejce",151,12,1,11,0],"kureciprsa":["Kuřecí prsa",106,23,0,1.5,0],
     "rohlik":["Rohlík bílý",310,9.8,57,3.7,4],"chleb":["Chléb kmínový",244,8,45,1,4],
     "sunka":["Šunka",118,19,0.5,4.5,0],"mleko":["Mléko",46,3.3,4.7,1.5,0]
   });
   if(splashStatus) splashStatus.textContent = "záložní DB: "+Object.keys(FOOD_DB).length+" položek";
+}
+
+// Parsování CSV → FOOD_DB objekt
+// Podporuje formáty:
+//   nazev,kcal,bilkoviny,sacharidy,tuky,vlaknina   (bez diakritiky)
+//   nazev,kcal,bílkoviny,sacharidy,tuky,vláknina   (s diakritikou)
+// Hodnoty mohou být v uvozovkách, sloupce odděleny čárkou
+function parseCSVtoDB(text){
+  const lines = text.split(/\r?\n/);
+  if(!lines.length) return {};
+
+  // Detekuj hlavičku
+  const rawHeader = lines[0].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+  const headers = rawHeader.split(",").map(h=>h.trim().replace(/^"|"$/g,""));
+
+  const idx = {
+    nazev:   headers.findIndex(h=>h==="nazev"||h==="name"),
+    kcal:    headers.findIndex(h=>h==="kcal"||h==="energie"||h==="energy"),
+    bilk:    headers.findIndex(h=>h.startsWith("bilk")||h.startsWith("prot")||h==="b"),
+    sach:    headers.findIndex(h=>h.startsWith("sach")||h.startsWith("carb")||h==="s"),
+    tuky:    headers.findIndex(h=>h.startsWith("tuk")||h.startsWith("fat")||h==="t"),
+    vlak:    headers.findIndex(h=>h.startsWith("vlak")||h.startsWith("fib")||h==="vl"),
+  };
+
+  if(idx.nazev === -1){ console.warn("CSV: sloupec 'nazev' nenalezen, hlavička:", headers); return {}; }
+
+  const db = {};
+  for(let i=1; i<lines.length; i++){
+    const line = lines[i].trim();
+    if(!line) continue;
+
+    // CSV parser respektující uvozovky
+    const values = [];
+    let cur="", inQ=false;
+    for(let j=0; j<line.length; j++){
+      const c = line[j];
+      if(c==='"'){ inQ=!inQ; }
+      else if(c===','&&!inQ){ values.push(cur.trim().replace(/^"|"$/g,"")); cur=""; }
+      else { cur+=c; }
+    }
+    values.push(cur.trim().replace(/^"|"$/g,""));
+
+    const nazev = values[idx.nazev]||"";
+    if(!nazev) continue;
+
+    const kcal = idx.kcal>=0 ? parseFloat(values[idx.kcal])||0 : 0;
+    const b    = idx.bilk>=0 ? parseFloat(values[idx.bilk])||0 : 0;
+    const s    = idx.sach>=0 ? parseFloat(values[idx.sach])||0 : 0;
+    const t    = idx.tuky>=0 ? parseFloat(values[idx.tuky])||0 : 0;
+    const vl   = idx.vlak>=0 ? parseFloat(values[idx.vlak])||0 : 0;
+
+    if(kcal===0 && b===0 && s===0 && t===0) continue; // prázdný řádek
+
+    // Klíč = normalizovaný název bez diakritiky a mezerníků
+    const key = nazev.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]/g,"");
+    if(key) db[key] = [nazev, kcal, b, s, t, vl];
+  }
+  return db;
 }
 
 
