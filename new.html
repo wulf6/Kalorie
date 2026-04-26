@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kalorie AI - jednoduchá verze</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,sans-serif;background:#f1f5f9;padding:16px;padding-bottom:80px}
+.card{background:white;border-radius:16px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1)}
+.fab{position:fixed;bottom:20px;right:20px;width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;font-size:28px;border:none;box-shadow:0 4px 12px rgba(0,0,0,0.3);cursor:pointer}
+.prog-bar{background:#e2e8f0;border-radius:99px;height:8px;margin:8px 0}
+.prog-fill{background:#6366f1;height:100%;border-radius:99px;width:0%}
+.entry{background:white;border-radius:12px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<button class="fab" id="addBtn">+</button>
+
+<script>
+// ============================================================
+// KALORIE AI - FUNKČNÍ JEDNODUCHÁ VERZE
+// Žádné await, žádné načítání databáze, funguje ihned
+// ============================================================
+
+const LIMIT = 2475;
+
+function today() {
+    return new Date().toISOString().slice(0,10);
+}
+
+function loadEntries() {
+    const key = 'kalorie_' + today();
+    const saved = localStorage.getItem(key);
+    if(saved) {
+        return JSON.parse(saved);
+    }
+    return [];
+}
+
+function saveEntries(entries) {
+    const key = 'kalorie_' + today();
+    localStorage.setItem(key, JSON.stringify(entries));
+    console.log('Uloženo:', entries.length, 'položek');
+}
+
+function render() {
+    const entries = loadEntries();
+    const total = entries.reduce((s,e) => s + e.kcal, 0);
+    const remaining = LIMIT - total;
+    const percent = Math.min((total / LIMIT) * 100, 100);
+    
+    let html = `
+        <div style="max-width:500px;margin:0 auto">
+            <div class="card">
+                <div style="font-size:22px;font-weight:800;margin-bottom:8px">🍽 Kalorie AI</div>
+                <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+                    <span>Kalorie (příjem)</span>
+                    <span><strong>${Math.round(total)}</strong> / ${LIMIT} kcal</span>
+                </div>
+                <div class="prog-bar"><div class="prog-fill" style="width:${percent}%"></div></div>
+                <div style="margin-top:6px;color:${remaining<0?'#ef4444':'#22c55e'}">
+                    ${remaining > 0 ? remaining + ' kcal zbývá' : '⚠️ Přesaženo o ' + Math.abs(remaining) + ' kcal'}
+                </div>
+            </div>
+    `;
+    
+    if(entries.length === 0) {
+        html += `<div class="card" style="text-align:center;color:#64748b">
+            🍽 Žádná jídla<br>
+            Klikni na <strong>+</strong> pro přidání
+        </div>`;
+    } else {
+        for(let i = 0; i < entries.length; i++) {
+            const e = entries[i];
+            html += `
+                <div class="entry">
+                    <div>
+                        <strong>${e.name}</strong>
+                        <div style="font-size:12px;color:#64748b">${e.grams} g</div>
+                    </div>
+                    <div style="text-align:right">
+                        <div style="font-weight:800;color:#f97316">${Math.round(e.kcal)} kcal</div>
+                        <button onclick="removeEntry(${i})" style="background:#fee2e2;border:none;border-radius:8px;padding:4px 10px;color:#ef4444;font-size:12px;cursor:pointer;margin-top:4px">Smazat</button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        html += `<div style="margin-top:12px">
+            <button onclick="resetDay()" style="width:100%;padding:12px;background:transparent;border:1px solid #e2e8f0;border-radius:12px;color:#64748b;cursor:pointer">🗑 Reset dne (uloží do historie)</button>
+        </div>`;
+    }
+    
+    html += `</div>`;
+    document.getElementById('app').innerHTML = html;
+}
+
+function addFood() {
+    const name = prompt('Název jídla:');
+    if(!name || name.trim() === '') return;
+    
+    const kcal = parseFloat(prompt('Počet kalorií (kcal):'));
+    if(isNaN(kcal) || kcal < 0) return;
+    
+    const grams = parseFloat(prompt('Hmotnost (g):', 100));
+    if(isNaN(grams) || grams <= 0) return;
+    
+    const entries = loadEntries();
+    entries.push({
+        name: name.trim(),
+        kcal: kcal,
+        grams: grams,
+        id: Date.now()
+    });
+    saveEntries(entries);
+    render();
+    alert(`✓ ${name} přidáno (${kcal} kcal, ${grams}g)`);
+}
+
+function removeEntry(index) {
+    if(confirm('Smazat toto jídlo?')) {
+        const entries = loadEntries();
+        entries.splice(index, 1);
+        saveEntries(entries);
+        render();
+    }
+}
+
+function resetDay() {
+    const entries = loadEntries();
+    if(entries.length === 0) {
+        alert('Dnes není co ukládat.');
+        return;
+    }
+    
+    if(confirm(`Uložit ${entries.length} položek do historie a začít nový den?`)) {
+        const history = JSON.parse(localStorage.getItem('kalorie_history') || '{}');
+        history[today()] = entries;
+        localStorage.setItem('kalorie_history', JSON.stringify(history));
+        localStorage.removeItem('kalorie_' + today());
+        render();
+        alert('✓ Den uložen do historie');
+    }
+}
+
+document.getElementById('addBtn').onclick = addFood;
+render();
+console.log('Aplikace spuštěna!');
+</script>
+</body>
+</html>
