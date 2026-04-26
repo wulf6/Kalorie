@@ -1,49 +1,34 @@
-const CACHE = "kalorie-v4";
-const FILES = [
-  "/Kalorie/",
-  "/Kalorie/index.html",
-  "/Kalorie/db.json",
-  "/Kalorie/manifest.json",
-  "/Kalorie/icon.svg"
+const CACHE_NAME = 'kalorie-ai-v1';
+const urlsToCache = [
+  '/Kalorie/',
+  '/Kalorie/index.html',
+  '/Kalorie/manifest.json',
+  '/Kalorie/icon.svg',
+  'https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.4/dist/quagga.min.js'
 ];
 
-self.addEventListener("install", e => {
-  e.waitUntil(
-    caches.open(CACHE)
-      .then(c => c.addAll(FILES))
-      .then(() => self.skipWaiting())
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(cache => cache.addAll(urlsToCache))
   );
 });
 
-self.addEventListener("activate", e => {
-  e.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
-      .then(() => self.clients.claim())
+self.addEventListener('fetch', event => {
+  event.respondWith(
+    caches.match(event.request)
+      .then(response => response || fetch(event.request))
   );
 });
 
-self.addEventListener("fetch", e => {
-  // API volání vždy přes internet
-  if (e.request.url.includes("googleapis") ||
-      e.request.url.includes("openfoodfacts") ||
-      e.request.url.includes("workers.dev") ||
-      e.request.url.includes("jsdelivr")) {
-    return;
-  }
-  // Vše ostatní z cache, pak network
-  e.respondWith(
-    caches.match(e.request)
-      .then(cached => cached || fetch(e.request)
-        .then(resp => {
-          // Cachuj nové soubory
-          if(resp.ok){
-            const clone = resp.clone();
-            caches.open(CACHE).then(c => c.put(e.request, clone));
-          }
-          return resp;
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(cacheNames => {
+      return Promise.all(
+        cacheNames.map(cache => {
+          if (cache !== CACHE_NAME) return caches.delete(cache);
         })
-        .catch(() => caches.match("/Kalorie/index.html"))
-      )
+      );
+    })
   );
 });
