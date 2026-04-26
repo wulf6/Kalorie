@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="cs">
+<html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -19,11 +19,6 @@ body{font-family:system-ui,sans-serif;background:#f1f5f9;padding:16px;padding-bo
 <button class="fab" id="addBtn">+</button>
 
 <script>
-// ============================================================
-// KALORIE AI - JEDNODUCHÁ FUNKČNÍ VERZE
-// Žádné načítání databáze, žádné await, žádné chyby
-// ============================================================
-
 const LIMIT = 2475;
 
 function today() {
@@ -68,11 +63,12 @@ function render() {
             Klikni na <strong>+</strong> pro přidání
         </div>`;
     } else {
-        entries.forEach((e, i) => {
+        for(let i = 0; i < entries.length; i++) {
+            const e = entries[i];
             html += `
                 <div class="entry">
                     <div>
-                        <strong>${escapeHtml(e.name)}</strong>
+                        <strong>${e.name}</strong>
                         <div style="font-size:12px;color:#64748b">${e.grams} g</div>
                     </div>
                     <div style="text-align:right">
@@ -81,7 +77,7 @@ function render() {
                     </div>
                 </div>
             `;
-        });
+        }
         
         html += `<div style="margin-top:12px">
             <button onclick="resetDay()" style="width:100%;padding:12px;background:transparent;border:1px solid #e2e8f0;border-radius:12px;color:#64748b;cursor:pointer">🗑 Reset dne (uloží do historie)</button>
@@ -90,15 +86,6 @@ function render() {
     
     html += `</div>`;
     document.getElementById('app').innerHTML = html;
-}
-
-function escapeHtml(str) {
-    return str.replace(/[&<>]/g, function(m) {
-        if(m === '&') return '&amp;';
-        if(m === '<') return '&lt;';
-        if(m === '>') return '&gt;';
-        return m;
-    });
 }
 
 function addFood() {
@@ -122,36 +109,34 @@ function addFood() {
     render();
 }
 
-window.removeEntry = function(index) {
+function removeEntry(index) {
     if(confirm('Smazat toto jídlo?')) {
         const entries = loadEntries();
         entries.splice(index, 1);
         saveEntries(entries);
         render();
     }
-};
+}
 
-window.resetDay = function() {
+function resetDay() {
     const entries = loadEntries();
-    if(entries.length === 0) return;
+    if(entries.length === 0) {
+        alert('Dnes není co ukládat.');
+        return;
+    }
     
-    if(confirm('Uložit dnešní jídla do historie a začít nový den?')) {
+    if(confirm(`Uložit ${entries.length} položek do historie a začít nový den?`)) {
         const history = JSON.parse(localStorage.getItem('kalorie_history') || '{}');
         history[today()] = entries;
         localStorage.setItem('kalorie_history', JSON.stringify(history));
         localStorage.removeItem('kalorie_' + today());
         render();
+        alert('✓ Den uložen do historie');
     }
-};
+}
 
 document.getElementById('addBtn').onclick = addFood;
 render();
-
-// Kontrola, jestli je splash schovaný (pro jistotu)
-setTimeout(() => {
-    const splash = document.getElementById('splash');
-    if(splash) splash.style.display = 'none';
-}, 100);
 </script>
 </body>
 </html>
