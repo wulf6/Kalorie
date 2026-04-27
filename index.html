@@ -1418,16 +1418,28 @@ function getDeviceId(){
   if(!id){ id = crypto.randomUUID(); localStorage.setItem("device_id", id); }
   return id;
 }
+function getUsername(){
+  return localStorage.getItem("sync_username") || null;
+}
+function saveSyncUsername(){
+  const inp = document.getElementById("sync-username-inp");
+  if(!inp) return;
+  const u = inp.value.trim().toLowerCase().replace(/[^a-z0-9]/g,"");
+  if(!u){ setToast("Zadej jméno"); return; }
+  localStorage.setItem("sync_username", u);
+  setToast("✓ Sync jméno uloženo: "+u);
+  scheduleSync();
+}
+
 const DEVICE_ID = getDeviceId();
 let syncTimeout = null;
-let _renderPending = false;
 
 async function syncWithServer(push = {}){
   try {
     const resp = await fetch(SERVER_URL + "/sync", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ device_id: DEVICE_ID, ...push })
+      body: JSON.stringify({ device_id: DEVICE_ID, username: getUsername(), ...push })
     });
     if(!resp.ok) throw new Error("HTTP " + resp.status);
     const data = await resp.json();
@@ -1436,7 +1448,6 @@ async function syncWithServer(push = {}){
     if(data.receptar && data.receptar.length){ sv("receptar", data.receptar); }
     const today = TODAY();
     if(data.entries && data.entries[today]){ entries = data.entries[today]; sv("ent_"+today, entries); }
-    // render pouze pokud není aktivní focus na inputu
     if(!document.activeElement || document.activeElement.tagName === "BODY"){
       render();
     }
@@ -1463,35 +1474,6 @@ addEntry = function(data){ _origAddEntry(data); scheduleSync(); };
 const _origUpdProf = updProf;
 updProf = function(k,v){ _origUpdProf(k,v); scheduleSync(); };
 
-// ── Sdílení dat mezi zařízeními přes PIN ─────────────────────────────────────
-function showSyncPin(){
-  const pin = DEVICE_ID.slice(0,8).toUpperCase();
-  const msg = `Tvůj sync PIN: <b style="font-size:20px;letter-spacing:3px">${pin}</b><br><br>Na druhém zařízení jdi do Profilu → Sync → zadej tento PIN.`;
-  showModal(msg, ()=>{});
-  // přepsat tlačítka modalu
-  setTimeout(()=>{
-    const yes = document.querySelector("#modal button[onclick='modalYes()']");
-    const no = document.querySelector("#modal button[onclick='closeModal()']");
-    if(yes){ yes.textContent = "📋 Kopírovat PIN"; yes.onclick = ()=>{ navigator.clipboard?.writeText(pin); setToast("PIN zkopírován!"); closeModal(); }; }
-    if(no){ no.textContent = "Zavřít"; }
-  }, 50);
-}
-
-function applySyncPin(pin){
-  if(!pin || pin.length < 6){ setToast("Krátký PIN"); return; }
-  // najít device_id podle pinu - uložit jako vlastní
-  const fullId = localStorage.getItem("device_id_"+pin.toUpperCase());
-  if(fullId){
-    localStorage.setItem("device_id", fullId);
-    location.reload();
-  } else {
-    // zkusit použít PIN jako prefix device_id
-    localStorage.setItem("device_id", pin.toLowerCase()+"-"+crypto.randomUUID().slice(9));
-    setToast("✓ PIN nastaven, synchronizuji…");
-    syncWithServer({ profile, entries:{ [TODAY()]:entries }, history:hist, receptar:ls("receptar",[]) });
-  }
-}
-
 // Sync při startu
 syncWithServer({
   profile,
@@ -1499,6 +1481,7 @@ syncWithServer({
   history: hist,
   receptar: ls("receptar", [])
 });  
+
 </script>
 </body>
 </html>
