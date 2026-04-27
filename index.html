@@ -1410,6 +1410,62 @@ setTimeout(() => {
 }, 5000);
 
 loadFoodDB().then(() => render()).catch(err => { console.error(err); render(); });
+// ── SYNC SE SERVEREM ─────────────────────────────────────────────────────────
+const SERVER_URL = "https://kalorie-backend-ny34.onrender.com";
+
+function getDeviceId(){
+  let id = localStorage.getItem("device_id");
+  if(!id){ id = crypto.randomUUID(); localStorage.setItem("device_id", id); }
+  return id;
+}
+const DEVICE_ID = getDeviceId();
+let syncTimeout = null;
+
+async function syncWithServer(push = {}){
+  try {
+    const resp = await fetch(SERVER_URL + "/sync", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ device_id: DEVICE_ID, ...push })
+    });
+    if(!resp.ok) throw new Error("HTTP " + resp.status);
+    const data = await resp.json();
+    if(data.profile && Object.keys(data.profile).length){ profile = data.profile; sv("prof2", profile); }
+    if(data.history && Object.keys(data.history).length){ hist = data.history; sv("hist2", hist); }
+    if(data.receptar && data.receptar.length){ sv("receptar", data.receptar); }
+    const today = TODAY();
+    if(data.entries && data.entries[today]){ entries = data.entries[today]; sv("ent_"+today, entries); }
+    render();
+    setToast("☁️ Synchronizováno");
+  } catch(e){
+    console.warn("Sync offline:", e.message);
+  }
+}
+
+function scheduleSync(){
+  clearTimeout(syncTimeout);
+  syncTimeout = setTimeout(()=>{
+    syncWithServer({
+      profile,
+      entries: { [TODAY()]: entries },
+      history: hist,
+      receptar: ls("receptar", [])
+    });
+  }, 2000);
+}
+
+const _origAddEntry = addEntry;
+addEntry = function(data){ _origAddEntry(data); scheduleSync(); };
+const _origUpdProf = updProf;
+updProf = function(k,v){ _origUpdProf(k,v); scheduleSync(); };
+
+// Sync při startu
+syncWithServer({
+  profile,
+  entries: { [TODAY()]: entries },
+  history: hist,
+  receptar: ls("receptar", [])
+});  
 </script>
 </body>
 </html>
