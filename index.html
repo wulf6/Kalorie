@@ -1428,8 +1428,18 @@ function saveSyncUsername(){
   const u = inp.value.trim().toLowerCase().replace(/[^a-z0-9]/g,"");
   if(!u){ setToast("Zadej jméno"); return; }
   localStorage.setItem("sync_username", u);
-  setToast("✓ Sync jméno uloženo: "+u);
-  scheduleSync();
+  setToast("✓ Sync jméno uloženo: "+u+", synchronizuji…");
+  // Ihned pushni VŠECHNA data pod novým username
+  syncWithServer({
+    profile,
+    entries: Object.fromEntries(
+      Object.keys(localStorage)
+        .filter(k => k.startsWith("ent_"))
+        .map(k => [k.replace("ent_",""), JSON.parse(localStorage.getItem(k)||"[]")])
+    ),
+    history: hist,
+    receptar: ls("receptar", [])
+  });
 }
 
 const DEVICE_ID = getDeviceId();
