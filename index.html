@@ -1431,15 +1431,7 @@ function saveSyncUsername(){
   setToast("✓ Sync jméno uloženo: "+u+", synchronizuji…");
   // Ihned pushni VŠECHNA data pod novým username
   syncWithServer({});
-    profile,
-    entries: Object.fromEntries(
-      Object.keys(localStorage)
-        .filter(k => k.startsWith("ent_"))
-        .map(k => [k.replace("ent_",""), JSON.parse(localStorage.getItem(k)||"[]")])
-    ),
-    history: hist,
-    receptar: ls("receptar", [])
-  });
+   });
 }
 
 const DEVICE_ID = getDeviceId();
@@ -1472,11 +1464,7 @@ function scheduleSync(){
   clearTimeout(syncTimeout);
   syncTimeout = setTimeout(()=>{
     syncWithServer({});
-      profile,
-      entries: { [TODAY()]: entries },
-      history: hist,
-      receptar: ls("receptar", [])
-    });
+        });
   }, 2000);
 }
 
