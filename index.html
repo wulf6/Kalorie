@@ -1430,7 +1430,7 @@ function saveSyncUsername(){
   localStorage.setItem("sync_username", u);
   setToast("✓ Sync jméno uloženo: "+u+", synchronizuji…");
   // Ihned pushni VŠECHNA data pod novým username
-  syncWithServer({
+  syncWithServer({});
     profile,
     entries: Object.fromEntries(
       Object.keys(localStorage)
@@ -1471,7 +1471,7 @@ async function syncWithServer(push = {}){
 function scheduleSync(){
   clearTimeout(syncTimeout);
   syncTimeout = setTimeout(()=>{
-    syncWithServer({
+    syncWithServer({});
       profile,
       entries: { [TODAY()]: entries },
       history: hist,
