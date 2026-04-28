@@ -362,44 +362,105 @@ function getTypicalGrams(name){
 // Načtení databáze potravin
 async function loadFoodDB(){
   const splashStatus = document.getElementById("splash-status");
+  const CACHE_KEY = "food_db_cache_v10";
+  const CACHE_TIME_KEY = "food_db_cache_time_v10";
+  const GITHUB_RAW = "https://raw.githubusercontent.com/wulf6/Kalorie/main/db.json";
 
+  // Smaž staré cache verze
+  ["food_db_cache_v8","food_db_cache_v9","food_db_cache_time_v8","food_db_cache_time_v9"]
+    .forEach(k=>{ try{localStorage.removeItem(k);}catch(_){} });
+
+  // Cache
   try {
-    const cached = localStorage.getItem("food_db_cache_v8");
-    const cacheTime = localStorage.getItem("food_db_cache_time_v8");
-    const oneDay = 24*60*60*1000;
-    if(cached && cacheTime && (Date.now()-parseInt(cacheTime)) < oneDay){
+    const cached = localStorage.getItem(CACHE_KEY);
+    const cacheTime = localStorage.getItem(CACHE_TIME_KEY);
+    if(cached && cacheTime && (Date.now()-parseInt(cacheTime)) < 24*60*60*1000){
       Object.assign(FOOD_DB, JSON.parse(cached));
       if(splashStatus) splashStatus.textContent = Object.keys(FOOD_DB).length+" položek z cache";
       return;
     }
   } catch(_){}
 
-  try {
-    if(splashStatus) splashStatus.textContent = "stahuji databázi…";
-    const response = await fetch("db.json?v="+Date.now(), { cache:"no-cache" });
-    if(!response.ok) throw new Error("HTTP "+response.status);
-    const data = await response.json();
-    Object.assign(FOOD_DB, data);
+  // Stažení: lokální soubor → GitHub Raw (funguje i z file://)
+  async function fetchCSV(){
     try {
-      localStorage.setItem("food_db_cache_v8", JSON.stringify(data));
-      localStorage.setItem("food_db_cache_time_v8", Date.now().toString());
+      const r = await fetch("db.json?v="+Date.now(), {cache:"no-cache"});
+      if(r.ok){ const t=await r.text(); if(t.length>500&&t.includes(",")) return t; }
     } catch(_){}
-    if(splashStatus) splashStatus.textContent = Object.keys(FOOD_DB).length+" položek načteno";
-    return;
-  } catch(e){
-    console.warn("Nelze načíst db.json:", e.message);
-    if(splashStatus) splashStatus.textContent = "chyba: "+e.message;
+    const r2 = await fetch(GITHUB_RAW+"?v="+Date.now(), {cache:"no-cache"});
+    if(!r2.ok) throw new Error("GitHub HTTP "+r2.status);
+    return r2.text();
   }
 
-  // Fallback
+  try {
+    if(splashStatus) splashStatus.textContent = "stahuji databázi…";
+    const text = await fetchCSV();
+    const newDB = parseCSVtoDB(text);
+    const count = Object.keys(newDB).length;
+    if(count > 10){
+      Object.assign(FOOD_DB, newDB);
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify(newDB));
+        localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
+      } catch(_){}
+      if(splashStatus) splashStatus.textContent = count+" položek načteno";
+      return;
+    }
+    throw new Error("Příliš málo dat: "+count);
+  } catch(e){
+    console.warn("DB chyba:", e.message);
+    if(splashStatus) splashStatus.textContent = "záložní DB…";
+  }
+
+  // Fallback mini-DB
   Object.assign(FOOD_DB, {
     "banan":["Banán",94,1.2,22,0.2,2],"jablko":["Jablko",62,0.4,13,0.4,3],
     "mrkev":["Mrkev",42,1,7,0.2,3],"brambory":["Brambory vařené",84,1.7,18,0.1,1],
-    "vejce":["Vejce",151,12,1,11,0],"kureci prsa":["Kuřecí prsa",106,23,0,1.5,0],
+    "vejce":["Vejce",151,12,1,11,0],"kureciprsa":["Kuřecí prsa",106,23,0,1.5,0],
     "rohlik":["Rohlík bílý",310,9.8,57,3.7,4],"chleb":["Chléb kmínový",244,8,45,1,4],
     "sunka":["Šunka",118,19,0.5,4.5,0],"mleko":["Mléko",46,3.3,4.7,1.5,0]
   });
   if(splashStatus) splashStatus.textContent = "záložní DB: "+Object.keys(FOOD_DB).length+" položek";
+}
+
+// CSV parser – db.json je ve skutečnosti CSV soubor
+// Formát: nazev,kcal,bilkoviny,sacharidy,tuky,vlaknina
+function parseCSVtoDB(text){
+  const lines = text.split(/\r?\n/);
+  if(!lines.length) return {};
+  const rawHeader = lines[0].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+  const headers = rawHeader.split(",").map(h=>h.trim().replace(/^"|"$/g,""));
+  const idx = {
+    nazev: headers.findIndex(h=>h==="nazev"||h==="name"),
+    kcal:  headers.findIndex(h=>h==="kcal"||h==="energie"),
+    bilk:  headers.findIndex(h=>h.startsWith("bilk")||h.startsWith("prot")||h==="b"),
+    sach:  headers.findIndex(h=>h.startsWith("sach")||h.startsWith("carb")||h==="s"),
+    tuky:  headers.findIndex(h=>h.startsWith("tuk")||h.startsWith("fat")||h==="t"),
+    vlak:  headers.findIndex(h=>h.startsWith("vlak")||h.startsWith("fib")||h==="vl"),
+  };
+  if(idx.nazev===-1){ console.warn("CSV: chybí sloupec nazev. Hlavička:", headers); return {}; }
+  const db = {};
+  for(let i=1; i<lines.length; i++){
+    const line = lines[i].trim(); if(!line) continue;
+    const vals=[]; let cur="",inQ=false;
+    for(let j=0;j<line.length;j++){
+      const c=line[j];
+      if(c==='"'){inQ=!inQ;}
+      else if(c===','&&!inQ){vals.push(cur.trim().replace(/^"|"$/g,""));cur="";}
+      else{cur+=c;}
+    }
+    vals.push(cur.trim().replace(/^"|"$/g,""));
+    const nazev=vals[idx.nazev]||""; if(!nazev) continue;
+    const kcal=idx.kcal>=0?parseFloat(vals[idx.kcal])||0:0;
+    const b=idx.bilk>=0?parseFloat(vals[idx.bilk])||0:0;
+    const s=idx.sach>=0?parseFloat(vals[idx.sach])||0:0;
+    const t=idx.tuky>=0?parseFloat(vals[idx.tuky])||0:0;
+    const vl=idx.vlak>=0?parseFloat(vals[idx.vlak])||0:0;
+    if(kcal===0&&b===0&&s===0&&t===0) continue;
+    const key=nazev.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]/g,"");
+    if(key) db[key]=[nazev,kcal,b,s,t,vl];
+  }
+  return db;
 }
 
 
@@ -989,6 +1050,16 @@ function render(){
             Klíč zdarma na <b>aistudio.google.com/apikey</b><br>
             Ukládá se pouze v tomto prohlížeči, nikam se neodesílá.
           </div>
+        </div>
+
+        <!-- JSONBin Sync -->
+        <div style="padding:14px;background:var(--surface);border-radius:12px;border:1px solid var(--border)">
+          <div style="font-weight:700;font-size:13px;margin-bottom:4px">☁️ Sync mezi zařízeními (JSONBin.io)</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6">1. Zaregistruj se zdarma na <b>jsonbin.io</b><br>2. Vytvoř nový Bin (obsah: <code>{}</code>)<br>3. Zkopíruj <b>Bin ID</b> a <b>Master API Key</b> sem</div>
+          <input class="inp" type="text" id="sync-bin-id" placeholder="Bin ID (např. 6615abc...)" style="margin-bottom:8px;font-family:monospace;font-size:12px" autocomplete="off"/>
+          <input class="inp" type="password" id="sync-api-key" placeholder="Master API Key ($2a$...)" style="margin-bottom:8px;font-family:monospace;font-size:12px" autocomplete="off"/>
+          <button onclick="saveSyncConfig()" style="width:100%;padding:11px;background:linear-gradient(135deg,#0ea5e9,#0284c7);border:none;border-radius:10px;color:#fff;font-weight:700;font-size:13px;cursor:pointer">💾 Uložit a synchronizovat</button>
+          ${profile.syncBinId?`<div style="font-size:11px;color:#16a34a;margin-top:6px">✅ Sync aktivní · Bin: ${profile.syncBinId.slice(0,12)}…<br><span style="color:var(--muted)">Stejný Bin ID zadej na Androidu pro sdílení dat</span></div>`:`<div style="font-size:11px;color:var(--muted);margin-top:6px">Klíče se ukládají jen lokálně, nikam se neodesílají.</div>`}
         </div>
 
         <!-- Proxy URL -->
@@ -1868,314 +1939,263 @@ function dbKey(s){
   return s.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]/g,"");
 }
 function searchDB(q, limit=10){
-  if(!q || q.length < 1) return [];
-  const needle = dbKey(q);
-  if(!needle || needle.length < 1) return [];
-  const starts = [], contains = [];
-  for(const [key, val] of Object.entries(FOOD_DB)){
+  if(!q||q.length<1) return [];
+  const needle=dbKey(q); if(!needle) return [];
+  const starts=[],contains=[];
+  for(const [key,val] of Object.entries(FOOD_DB)){
     if(key.startsWith(needle)) starts.push(val);
     else if(key.includes(needle)) contains.push(val);
-    if(starts.length + contains.length >= limit * 2) break;
+    if(starts.length+contains.length>=limit*2) break;
   }
-  return [...starts, ...contains].slice(0, limit);
+  return [...starts,...contains].slice(0,limit);
 }
 
 // ── Suggest dropdown ──────────────────────────────────────────────────────────
-let _sugCallback = null;
-function showGlobalSuggest(inputEl, items, onSelect){
-  if(!items || !items.length){ hideGlobalSuggest(); return; }
-  _sugCallback = onSelect;
-  let sug = document.getElementById("g-suggest");
-  if(!sug){
-    sug = document.createElement("div");
-    sug.id = "g-suggest";
-    sug.style.cssText = "position:fixed;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.25);z-index:10000;max-height:260px;overflow-y:auto;-webkit-overflow-scrolling:touch";
-    document.body.appendChild(sug);
-  }
-  const rect = inputEl.getBoundingClientRect();
-  const spaceBelow = window.innerHeight - rect.bottom - 8;
-  const height = Math.min(260, Math.max(80, spaceBelow > 100 ? spaceBelow : rect.top - 8));
-  const top = spaceBelow > 100 ? rect.bottom + 4 : rect.top - height - 4;
-  sug.style.cssText += `;top:${top}px;left:${Math.max(8,rect.left)}px;width:${rect.width}px;max-height:${height}px;display:block`;
-  sug.innerHTML = items.map((e,i) =>
-    `<div data-idx="${i}" style="padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:14px" onmouseenter="this.style.background='var(--surface)'" onmouseleave="this.style.background=''">
-      <span style="font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e[0]}</span>
-      <span style="color:var(--muted);font-size:12px;flex-shrink:0">${Math.round(e[1])} kcal/100g</span>
-    </div>`).join("");
-  sug.querySelectorAll("[data-idx]").forEach(el => {
-    const pick = (ev) => { ev.preventDefault(); ev.stopPropagation(); const cb=_sugCallback; hideGlobalSuggest(); if(cb) cb(items[+el.dataset.idx]); };
-    el.addEventListener("mousedown", pick);
-    el.addEventListener("touchend", pick, {passive:false});
+let _sugCallback=null;
+function showGlobalSuggest(inputEl,items,onSelect){
+  if(!items||!items.length){hideGlobalSuggest();return;}
+  _sugCallback=onSelect;
+  let sug=document.getElementById("g-suggest");
+  if(!sug){sug=document.createElement("div");sug.id="g-suggest";sug.style.cssText="position:fixed;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.25);z-index:10000;max-height:260px;overflow-y:auto;-webkit-overflow-scrolling:touch";document.body.appendChild(sug);}
+  const rect=inputEl.getBoundingClientRect();
+  const spaceBelow=window.innerHeight-rect.bottom-8;
+  const height=Math.min(260,Math.max(80,spaceBelow>100?spaceBelow:rect.top-8));
+  const top=spaceBelow>100?rect.bottom+4:rect.top-height-4;
+  sug.style.top=top+"px";sug.style.left=Math.max(8,rect.left)+"px";sug.style.width=rect.width+"px";sug.style.maxHeight=height+"px";sug.style.display="block";
+  sug.innerHTML=items.map((e,i)=>`<div data-idx="${i}" style="padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:14px" onmouseenter="this.style.background='var(--surface)'" onmouseleave="this.style.background=''"><span style="font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e[0]}</span><span style="color:var(--muted);font-size:12px;flex-shrink:0">${Math.round(e[1])} kcal/100g</span></div>`).join("");
+  sug.querySelectorAll("[data-idx]").forEach(el=>{
+    const pick=(ev)=>{ev.preventDefault();ev.stopPropagation();const cb=_sugCallback;hideGlobalSuggest();if(cb)cb(items[+el.dataset.idx]);};
+    el.addEventListener("mousedown",pick);el.addEventListener("touchend",pick,{passive:false});
   });
 }
-function hideGlobalSuggest(){
-  const sug = document.getElementById("g-suggest");
-  if(sug) sug.style.display = "none";
-  _sugCallback = null;
-}
-document.addEventListener("mousedown", e => {
-  const sug = document.getElementById("g-suggest");
-  if(sug && sug.style.display !== "none" && !sug.contains(e.target)) hideGlobalSuggest();
-}, true);
-document.addEventListener("touchstart", e => {
-  const sug = document.getElementById("g-suggest");
-  if(sug && sug.style.display !== "none" && !sug.contains(e.target)) hideGlobalSuggest();
-}, {passive:true});
+function hideGlobalSuggest(){const sug=document.getElementById("g-suggest");if(sug)sug.style.display="none";_sugCallback=null;}
+document.addEventListener("mousedown",e=>{const sug=document.getElementById("g-suggest");if(sug&&sug.style.display!=="none"&&!sug.contains(e.target))hideGlobalSuggest();},true);
+document.addEventListener("touchstart",e=>{const sug=document.getElementById("g-suggest");if(sug&&sug.style.display!=="none"&&!sug.contains(e.target))hideGlobalSuggest();},{passive:true});
 
 // ── Manuální přidání ──────────────────────────────────────────────────────────
-let _currentManualEntry = null;
+let _currentManualEntry=null;
 function onManualInput(){
-  const inp = document.getElementById("m-name"); if(!inp) return;
-  _currentManualEntry = null;
-  document.getElementById("m-autofill-info").style.display = "none";
-  const q = inp.value.trim();
-  if(q.length < 1){ hideGlobalSuggest(); return; }
-  const matches = searchDB(q, 10);
-  if(!matches.length){ hideGlobalSuggest(); return; }
-  showGlobalSuggest(inp, matches, selectManualSug);
+  const inp=document.getElementById("m-name");if(!inp)return;
+  _currentManualEntry=null;
+  document.getElementById("m-autofill-info").style.display="none";
+  const q=inp.value.trim();if(q.length<1){hideGlobalSuggest();return;}
+  const matches=searchDB(q,10);if(!matches.length){hideGlobalSuggest();return;}
+  showGlobalSuggest(inp,matches,selectManualSug);
 }
 function selectManualSug(entry){
-  _currentManualEntry = entry;
-  const inp = document.getElementById("m-name");
-  if(inp) inp.value = entry[0];
+  _currentManualEntry=entry;
+  const inp=document.getElementById("m-name");if(inp)inp.value=entry[0];
   hideGlobalSuggest();
-  const tg = getTypicalGrams(entry[0]);
-  const gInp = document.getElementById("m-g");
-  if(gInp) gInp.value = tg;
-  fillManualFromEntry(entry, tg);
+  const tg=getTypicalGrams(entry[0]);
+  const gInp=document.getElementById("m-g");if(gInp)gInp.value=tg;
+  fillManualFromEntry(entry,tg);
 }
-function fillManualFromEntry(entry, g){
-  const r = (parseFloat(g)||100)/100;
-  const set = (id,v) => { const el=document.getElementById(id); if(el) el.value=v; };
-  set("m-kcal", Math.round(entry[1]*r));
-  set("m-b",   (entry[2]*r).toFixed(1));
-  set("m-s",   (entry[3]*r).toFixed(1));
-  set("m-t",   (entry[4]*r).toFixed(1));
-  set("m-vl",  ((entry[5]||0)*r).toFixed(1));
-  const info = document.getElementById("m-autofill-info");
-  if(info){ info.textContent="✓ Načteno z databáze · uprav porci dle potřeby"; info.style.display="block"; }
+function fillManualFromEntry(entry,g){
+  const r=(parseFloat(g)||100)/100;
+  const set=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v;};
+  set("m-kcal",Math.round(entry[1]*r));set("m-b",(entry[2]*r).toFixed(1));
+  set("m-s",(entry[3]*r).toFixed(1));set("m-t",(entry[4]*r).toFixed(1));
+  set("m-vl",((entry[5]||0)*r).toFixed(1));
+  const info=document.getElementById("m-autofill-info");
+  if(info){info.textContent="✓ Načteno z databáze · uprav porci dle potřeby";info.style.display="block";}
 }
-function onManualGrams(){
-  if(!_currentManualEntry) return;
-  const g = parseFloat(document.getElementById("m-g")?.value)||100;
-  fillManualFromEntry(_currentManualEntry, g);
-}
-function onManualKey(ev){
-  if(ev.key==="Escape"){ hideGlobalSuggest(); return; }
-  if(ev.key==="Enter"){ ev.preventDefault(); hideGlobalSuggest(); handleManual(); }
-}
+function onManualGrams(){if(!_currentManualEntry)return;const g=parseFloat(document.getElementById("m-g")?.value)||100;fillManualFromEntry(_currentManualEntry,g);}
+function onManualKey(ev){if(ev.key==="Escape"){hideGlobalSuggest();return;}if(ev.key==="Enter"){ev.preventDefault();hideGlobalSuggest();handleManual();}}
 function handleManual(){
-  const name = document.getElementById("m-name").value.trim();
-  if(!name){ showErr("Zadej název."); return; }
-  const liquid = isLiquid(name);
-  const g = parseFloat(document.getElementById("m-g").value)||(liquid?250:100);
-  const kcal = parseFloat(document.getElementById("m-kcal").value)||0;
-  if(!liquid && !kcal){ showErr("Zadej kalorie (kcal)."); return; }
-  addEntry({ jidlo:name, porce_g:g, kcal, b:parseFloat(document.getElementById("m-b").value)||0, s:parseFloat(document.getElementById("m-s").value)||0, t:parseFloat(document.getElementById("m-t").value)||0, vl:parseFloat(document.getElementById("m-vl").value)||0, isWater:liquid, source:"manual" });
+  const name=document.getElementById("m-name").value.trim();if(!name){showErr("Zadej název.");return;}
+  const liquid=isLiquid(name);
+  const g=parseFloat(document.getElementById("m-g").value)||(liquid?250:100);
+  const kcal=parseFloat(document.getElementById("m-kcal").value)||0;
+  if(!liquid&&!kcal){showErr("Zadej kalorie (kcal).");return;}
+  addEntry({jidlo:name,porce_g:g,kcal,b:parseFloat(document.getElementById("m-b").value)||0,s:parseFloat(document.getElementById("m-s").value)||0,t:parseFloat(document.getElementById("m-t").value)||0,vl:parseFloat(document.getElementById("m-vl").value)||0,isWater:liquid,source:"manual"});
   closeAdd();
 }
 
 // ── Recept ────────────────────────────────────────────────────────────────────
 function onRecInput(){
-  const inp = document.getElementById("rec-name"); if(!inp) return;
-  if(inp.value.trim().length < 1){ hideGlobalSuggest(); return; }
-  const matches = searchDB(inp.value, 10);
-  if(!matches.length){ hideGlobalSuggest(); return; }
-  showGlobalSuggest(inp, matches, (entry) => {
-    inp.value = entry[0];
-    const gInp = document.getElementById("rec-gram");
-    if(gInp) gInp.value = getTypicalGrams(entry[0]);
-    hideGlobalSuggest();
-  });
+  const inp=document.getElementById("rec-name");if(!inp)return;
+  if(inp.value.trim().length<1){hideGlobalSuggest();return;}
+  const matches=searchDB(inp.value,10);if(!matches.length){hideGlobalSuggest();return;}
+  showGlobalSuggest(inp,matches,(entry)=>{inp.value=entry[0];const gInp=document.getElementById("rec-gram");if(gInp)gInp.value=getTypicalGrams(entry[0]);hideGlobalSuggest();});
 }
-function onRecKey(ev){
-  if(ev.key==="Enter"){ ev.preventDefault(); addRecipeItem(); }
-  if(ev.key==="Escape") hideGlobalSuggest();
-}
+function onRecKey(ev){if(ev.key==="Enter"){ev.preventDefault();addRecipeItem();}if(ev.key==="Escape")hideGlobalSuggest();}
 function addRecipeItem(){
-  const nameEl = document.getElementById("rec-name"); if(!nameEl) return;
-  const name = nameEl.value.trim(); if(!name) return;
-  const g = parseFloat(document.getElementById("rec-gram")?.value)||100;
-  const found = lookupLocal(name);
-  const entry = found || [name,0,0,0,0,0];
-  const r = g/100;
-  recipe.push({id:Date.now()+Math.random(), j:entry[0]||name, g, k:entry[1]*r, b:entry[2]*r, s:entry[3]*r, t:entry[4]*r});
-  nameEl.value="";
-  const gramEl = document.getElementById("rec-gram"); if(gramEl) gramEl.value=100;
-  render();
+  const nameEl=document.getElementById("rec-name");if(!nameEl)return;
+  const name=nameEl.value.trim();if(!name)return;
+  const g=parseFloat(document.getElementById("rec-gram")?.value)||100;
+  const found=lookupLocal(name);const entry=found||[name,0,0,0,0,0];const r=g/100;
+  recipe.push({id:Date.now()+Math.random(),j:entry[0]||name,g,k:entry[1]*r,b:entry[2]*r,s:entry[3]*r,t:entry[4]*r});
+  nameEl.value="";const gramEl=document.getElementById("rec-gram");if(gramEl)gramEl.value=100;render();
 }
-function removeRecipeItem(id){ recipe=recipe.filter(i=>i.id!==id); render(); }
+function removeRecipeItem(id){recipe=recipe.filter(i=>i.id!==id);render();}
 function saveRecipe(){
-  const name = document.getElementById("rec-final-name")?.value?.trim();
-  if(!name){ alert("Zadej název jídla."); return; }
-  if(!recipe.length){ alert("Přidej alespoň jednu složku."); return; }
-  const slot = document.getElementById("rec-meal-sel")?.value || activeSlot;
-  const tot = recipe.reduce((a,i)=>({k:a.k+i.k,b:a.b+i.b,s:a.s+i.s,t:a.t+i.t,g:a.g+i.g}),{k:0,b:0,s:0,t:0,g:0});
-  if(editId){
-    entries=entries.map(e=>e.id===editId?{...e,jidlo:name,porce_g:Math.round(tot.g),kcal:tot.k,b:tot.b,s:tot.s,t:tot.t,slot}:e);
-    sv("ent_"+TODAY(),entries); editId=null; recipe=[];
-  } else {
-    activeSlot=slot;
-    addEntry({jidlo:name,porce_g:Math.round(tot.g),kcal:tot.k,b:tot.b,s:tot.s,t:tot.t,vl:0,isWater:false,source:"recept"});
-    recipe=[];
-  }
-  setTab("dnes"); setToast("✓ "+name+" přidáno!");
+  const name=document.getElementById("rec-final-name")?.value?.trim();
+  if(!name){alert("Zadej název jídla.");return;}if(!recipe.length){alert("Přidej alespoň jednu složku.");return;}
+  const slot=document.getElementById("rec-meal-sel")?.value||activeSlot;
+  const tot=recipe.reduce((a,i)=>({k:a.k+i.k,b:a.b+i.b,s:a.s+i.s,t:a.t+i.t,g:a.g+i.g}),{k:0,b:0,s:0,t:0,g:0});
+  if(editId){entries=entries.map(e=>e.id===editId?{...e,jidlo:name,porce_g:Math.round(tot.g),kcal:tot.k,b:tot.b,s:tot.s,t:tot.t,slot}:e);sv("ent_"+TODAY(),entries);editId=null;recipe=[];}
+  else{activeSlot=slot;addEntry({jidlo:name,porce_g:Math.round(tot.g),kcal:tot.k,b:tot.b,s:tot.s,t:tot.t,vl:0,isWater:false,source:"recept"});recipe=[];}
+  setTab("dnes");setToast("✓ "+name+" přidáno!");
 }
-function cancelEdit(){ editId=null; recipe=[]; render(); }
+function cancelEdit(){editId=null;recipe=[];render();}
 
 // ── Aktivity ──────────────────────────────────────────────────────────────────
 function logActivity(){
-  const sel=document.getElementById("act-select");
-  const minEl=document.getElementById("act-min");
-  if(!sel||!minEl) return;
+  const sel=document.getElementById("act-select"),minEl=document.getElementById("act-min");if(!sel||!minEl)return;
   const met=parseFloat(sel.value)||3.5;
   const name=sel.options[sel.selectedIndex]?.dataset?.name||sel.options[sel.selectedIndex]?.text||"Aktivita";
-  const min=parseFloat(minEl.value)||30;
-  const kcal=Math.round(met*profile.vaha*(min/60));
-  const log=ls("act_log",[]);
-  log.push({id:Date.now(),d:TODAY(),name,min,met,kcal});
-  sv("act_log",log);
-  setToast("✓ "+name+" zaznamenáno (−"+kcal+" kcal)");
-  render();
+  const min=parseFloat(minEl.value)||30,kcal=Math.round(met*profile.vaha*(min/60));
+  const log=ls("act_log",[]);log.push({id:Date.now(),d:TODAY(),name,min,met,kcal});sv("act_log",log);
+  setToast("✓ "+name+" zaznamenáno (−"+kcal+" kcal)");render();
 }
-function deleteActivity(id){
-  const log=ls("act_log",[]).filter(a=>String(a.id)!==String(id));
-  sv("act_log",log); render();
-}
+function deleteActivity(id){sv("act_log",ls("act_log",[]).filter(a=>String(a.id)!==String(id)));render();}
 function updateActPreview(){
-  const sel=document.getElementById("act-select");
-  const minEl=document.getElementById("act-min");
-  const prev=document.getElementById("act-preview");
-  if(!sel||!minEl||!prev) return;
+  const sel=document.getElementById("act-select"),minEl=document.getElementById("act-min"),prev=document.getElementById("act-preview");
+  if(!sel||!minEl||!prev)return;
   prev.textContent=Math.round((parseFloat(sel.value)||3.5)*profile.vaha*((parseFloat(minEl.value)||30)/60))+" kcal";
 }
 
-// ── EAN & scanner ─────────────────────────────────────────────────────────────
-async function handleEan(){
-  const code=document.getElementById("ean-inp")?.value?.trim();
-  if(!code){ showErr("Zadej EAN kód."); return; }
-  await lookupBarcode(code);
-}
-async function lookupBarcode(code){
-  clearMsg(); showOk("Hledám produkt…");
-  try{
-    const r=await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}?fields=product_name,product_name_cs,brands,nutriments,serving_size`);
-    const d=await r.json();
-    if(d.status===1&&d.product){
-      const p=d.product,n=p.nutriments||{};
-      const name=p.product_name_cs||p.product_name||p.brands||"Produkt "+code;
-      const porce=parseFloat(p.serving_size)||100;
-      const kcal100=parseFloat(n["energy-kcal_100g"])||0;
-      addEntry({jidlo:name,porce_g:porce,kcal:kcal100*porce/100,b:(parseFloat(n.proteins_100g)||0)*porce/100,s:(parseFloat(n.carbohydrates_100g)||0)*porce/100,t:(parseFloat(n.fat_100g)||0)*porce/100,vl:(parseFloat(n.fiber_100g)||0)*porce/100,isWater:isLiquid(name),source:"barcode"});
-      setTimeout(closeAdd,1200); return;
-    }
-  }catch(_){}
-  if(profile.geminiKey){
-    try{
-      const data=await callGemini(profile.geminiKey,`Odpověz POUZE JSON: {"jidlo":"Název česky","porce_g":100,"kcal":100,"b":10,"s":10,"t":5,"vl":2}\nEAN: ${code}. Identifikuj produkt a uveď nutriční hodnoty na 100g.`);
-      const raw=(data.candidates?.[0]?.content?.parts?.[0]?.text||"").replace(/```json|```/g,"").trim();
-      const parsed=JSON.parse(raw);
-      if(parsed.jidlo&&typeof parsed.kcal==="number"){ addEntry({...parsed,porce_g:parsed.porce_g||100,source:"barcode"}); setTimeout(closeAdd,1200); return; }
-    }catch(_){}
-  }
-  showErr("Produkt (EAN "+code+") nenalezen.");
-}
-function openScanner(){ document.getElementById("scan-file-inp").click(); }
-function closeScanner(){ document.getElementById("scanner").style.display="none"; }
-
-// ── Makra detail ──────────────────────────────────────────────────────────────
+// ── Makra, váha, historie ─────────────────────────────────────────────────────
 function showMacroDetail(label,type){
-  const modal=document.getElementById("macro-detail-modal"); if(!modal) return;
+  const modal=document.getElementById("macro-detail-modal");if(!modal)return;
   document.getElementById("macro-detail-title").textContent=label;
-  const keyMap={protein:"b",carbs:"s",fat:"t",fiber:"vl"};
-  const key=keyMap[type]||"b";
+  const keyMap={protein:"b",carbs:"s",fat:"t",fiber:"vl"},key=keyMap[type]||"b";
   const items=entries.filter(e=>e[key]>0).sort((a,b)=>b[key]-a[key]);
   const total=entries.reduce((s,e)=>s+(e[key]||0),0);
   document.getElementById("macro-detail-list").innerHTML=items.map(e=>`<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>${e.jidlo} <span style="color:var(--muted)">${e.porce_g}g</span></span><span style="font-weight:700">${(e[key]||0).toFixed(1)}g</span></div>`).join("");
   document.getElementById("macro-detail-total").textContent="Celkem: "+total.toFixed(1)+"g";
   modal.style.display="flex";
 }
-function closeMacroDetail(){ const m=document.getElementById("macro-detail-modal"); if(m) m.style.display="none"; }
-
-// ── Historie ──────────────────────────────────────────────────────────────────
-function repeatHistoryDay(date){
-  const items=hist[date]; if(!items||!items.length) return;
-  items.forEach(item=>addEntry({...item,id:undefined}));
-  setToast("✓ "+items.length+" položek z "+date+" přidáno");
-  setTab("dnes");
-}
-function exportHistoryCSV(){
-  let rows=[["Datum","Jídlo","Porce(g)","Kcal","Bílk(g)","Sach(g)","Tuky(g)","Vlák(g)","Zdroj"]];
-  const allDays={...hist,[TODAY()]:entries};
-  for(const [date,items] of Object.entries(allDays)){
-    for(const item of items){
-      rows.push([date,item.jidlo,item.porce_g,Math.round(item.kcal),(item.b||0).toFixed(1),(item.s||0).toFixed(1),(item.t||0).toFixed(1),(item.vl||0).toFixed(1),item.source||"manual"]);
-    }
-  }
-  const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
-  const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
-  const link=document.createElement("a");
-  link.href=URL.createObjectURL(blob); link.download=`kalorie_${TODAY()}.csv`; link.click();
-  URL.revokeObjectURL(link.href); setToast("📁 Export hotov");
-}
-function getPrevDate(d){ const dt=new Date(d); dt.setDate(dt.getDate()-1); return dt.toISOString().slice(0,10); }
-function getNextDate(d){ const dt=new Date(d); dt.setDate(dt.getDate()+1); return dt.toISOString().slice(0,10); }
-function setViewedDate(date){ viewedDate=date; render(); }
+function closeMacroDetail(){const m=document.getElementById("macro-detail-modal");if(m)m.style.display="none";}
 function logWeight(){
-  const inp=document.getElementById("w-inp"); if(!inp) return;
-  const w=parseFloat(inp.value);
-  if(isNaN(w)||w<20||w>300){ setToast("Neplatná hodnota"); return; }
-  const log=ls("weight_log",[]); log.push({d:TODAY(),w}); sv("weight_log",log);
-  setToast("✓ "+w+" kg uloženo"); render();
+  const inp=document.getElementById("w-inp");if(!inp)return;
+  const w=parseFloat(inp.value);if(isNaN(w)||w<20||w>300){setToast("Neplatná hodnota");return;}
+  const log=ls("weight_log",[]);log.push({d:TODAY(),w});sv("weight_log",log);
+  setToast("✓ "+w+" kg uloženo");render();
 }
+function deleteWeight(date){sv("weight_log",ls("weight_log",[]).filter(e=>e.d!==date));render();}
 function repeatEntry(id){
-  const orig=entries.find(e=>e.id===id); if(!orig) return;
-  const {id:_,...copy}=orig; entries.push({...copy,id:Date.now()});
-  sv("ent_"+TODAY(),entries); render(); setToast("✓ "+orig.jidlo+" přidáno znovu");
+  const orig=entries.find(e=>e.id===id);if(!orig)return;
+  const{id:_,...copy}=orig;entries.push({...copy,id:Date.now()});
+  sv("ent_"+TODAY(),entries);render();setToast("✓ "+orig.jidlo+" přidáno znovu");
+}
+function repeatYesterday(idx){
+  const items=window._ydItems||[];const e=items[idx];if(!e)return;
+  addEntry({...e,id:undefined});setToast("✓ "+e.jidlo+" přidáno znovu");
+}
+function requestNotifications(){
+  if(!("Notification" in window)){setToast("Notifikace nejsou podporovány");return;}
+  Notification.requestPermission().then(p=>{
+    if(p==="granted"){updProf("notifEnabled",true);scheduleNotification();setToast("✓ Notifikace zapnuty");}
+    else setToast("Notifikace zamítnuty");
+  });
+}
+function disableNotifications(){updProf("notifEnabled",false);setToast("Notifikace vypnuty");}
+function scheduleNotification(){
+  if(!profile.notifEnabled||Notification.permission!=="granted") return;
+  const now=new Date(),next=new Date();
+  next.setHours(20,0,0,0);if(next<=now)next.setDate(next.getDate()+1);
+  setTimeout(()=>{
+    const T=totals();
+    new Notification("🍽 Kalorie AI – denní přehled",{body:`Dnes: ${Math.round(T.kcal)} kcal | B:${T.b.toFixed(0)}g S:${T.s.toFixed(0)}g T:${T.t.toFixed(0)}g`,icon:"icon.svg"});
+    scheduleNotification();
+  },next-now);
 }
 
-// ── Sync ──────────────────────────────────────────────────────────────────────
-const SERVER_URL = "https://kalorie-backend-ny34.onrender.com";
-function getDeviceId(){
-  let id=localStorage.getItem("device_id");
-  if(!id){ id=crypto.randomUUID(); localStorage.setItem("device_id",id); }
-  return id;
-}
-function getUsername(){ return localStorage.getItem("sync_username")||null; }
-function saveSyncUsername(){
-  const inp=document.getElementById("sync-username-inp"); if(!inp) return;
-  const u=inp.value.trim().toLowerCase().replace(/[^a-z0-9]/g,"");
-  if(!u){ setToast("Zadej jméno"); return; }
-  localStorage.setItem("sync_username",u);
-  setToast("✓ Sync jméno uloženo: "+u);
-  syncWithServer({});
-}
-const DEVICE_ID = getDeviceId();
-let syncTimeout = null;
+// ── JSONBin Sync (bez vlastního serveru) ──────────────────────────────────────
+// Použití: Vytvoř si zdarma účet na jsonbin.io → New Bin → zkopíruj BIN ID a API KEY
+// Zadej je v Profilu → API záložka (pole SYNC BIN ID a SYNC API KEY)
+const JSONBIN_URL = "https://api.jsonbin.io/v3/b";
+
+function getDeviceId(){let id=localStorage.getItem("device_id");if(!id){id=crypto.randomUUID();localStorage.setItem("device_id",id);}return id;}
+function getUsername(){return localStorage.getItem("sync_username")||null;}
+const DEVICE_ID=getDeviceId();
+let syncTimeout=null;
+
 async function syncWithServer(push={}){
+  const binId=profile.syncBinId;
+  const apiKey=profile.syncApiKey;
+  if(!binId||!apiKey){return;} // Sync není nakonfigurovaný – tiše přeskočit
+
   try{
-    const resp=await fetch(SERVER_URL+"/sync",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({device_id:DEVICE_ID,username:getUsername(),...push})});
-    if(!resp.ok) throw new Error("HTTP "+resp.status);
-    const data=await resp.json();
-    if(data.profile&&Object.keys(data.profile).length){ profile=data.profile; sv("prof2",profile); }
-    if(data.history&&Object.keys(data.history).length){ hist=data.history; sv("hist2",hist); }
-    if(data.entries&&data.entries[TODAY()]){ entries=data.entries[TODAY()]; sv("ent_"+TODAY(),entries); }
-    if(!document.activeElement||document.activeElement.tagName==="BODY") render();
-  }catch(e){ console.warn("Sync offline:",e.message); }
+    // Nejprve načti aktuální data z binu
+    const getResp=await fetch(`${JSONBIN_URL}/${binId}/latest`,{
+      headers:{"X-Master-Key":apiKey,"X-Bin-Meta":"false"}
+    });
+    let remote={};
+    if(getResp.ok){
+      try{remote=await getResp.json();}catch(_){}
+    }
+
+    // Merge: lokální data mají přednost pro dnešek, remote pro ostatní dny
+    const today=TODAY();
+    const mergedHistory={...remote.history||{},...hist};
+    const mergedEntries={...remote.entries||{},[today]:entries};
+
+    // Ulož zpět sloučená data
+    const putResp=await fetch(`${JSONBIN_URL}/${binId}`,{
+      method:"PUT",
+      headers:{"Content-Type":"application/json","X-Master-Key":apiKey},
+      body:JSON.stringify({
+        profile,
+        entries:mergedEntries,
+        history:mergedHistory,
+        saved_foods:ls("saved_foods",[]),
+        updated:Date.now(),
+        device:DEVICE_ID
+      })
+    });
+    if(!putResp.ok) throw new Error("PUT HTTP "+putResp.status);
+
+    // Aplikuj remote data (jen pokud jsou novější)
+    if(remote.profile&&remote.updated&&remote.updated>ls("last_sync_time",0)){
+      // Slouč profil – zachovej lokální geminiKey pokud remote ho nemá
+      const mergedProfile={...remote.profile,...profile,geminiKey:profile.geminiKey||remote.profile.geminiKey||""};
+      profile=mergedProfile;sv("prof2",profile);
+    }
+    if(remote.history){hist={...remote.history,...hist};sv("hist2",hist);}
+    if(remote.entries&&remote.entries[today]&&remote.device!==DEVICE_ID){
+      // Přijmi změny z jiného zařízení pro dnešek (merge)
+      const remoteToday=remote.entries[today]||[];
+      const localIds=new Set(entries.map(e=>e.id));
+      const newFromRemote=remoteToday.filter(e=>!localIds.has(e.id));
+      if(newFromRemote.length){entries=[...entries,...newFromRemote];sv("ent_"+today,entries);}
+    }
+    if(remote.saved_foods){sv("saved_foods",remote.saved_foods);}
+    sv("last_sync_time",Date.now());
+    if(!document.activeElement||document.activeElement.tagName==="BODY")render();
+    setToast("☁️ Synchronizováno");
+  }catch(e){
+    console.warn("Sync chyba:",e.message);
+  }
 }
+
 function scheduleSync(){
   clearTimeout(syncTimeout);
-  syncTimeout=setTimeout(()=>{ syncWithServer({}); },2000);
+  syncTimeout=setTimeout(()=>syncWithServer({}),3000);
 }
+
+function saveSyncConfig(){
+  const binId=(document.getElementById("sync-bin-id")||{}).value?.trim();
+  const apiKey=(document.getElementById("sync-api-key")||{}).value?.trim();
+  if(!binId||!apiKey){setToast("Zadej Bin ID i API Key");return;}
+  profile={...profile,syncBinId:binId,syncApiKey:apiKey};
+  sv("prof2",profile);
+  setToast("✓ Sync uložen, synchronizuji…");
+  syncWithServer({});
+  render();
+}
+
 const _origAddEntry=addEntry;
-addEntry=function(data){ _origAddEntry(data); scheduleSync(); };
+addEntry=function(data){_origAddEntry(data);scheduleSync();};
 const _origUpdProf=updProf;
-updProf=function(k,v){ _origUpdProf(k,v); scheduleSync(); };
+updProf=function(k,v){_origUpdProf(k,v);scheduleSync();};
 
 // ── Spuštění ──────────────────────────────────────────────────────────────────
-setTimeout(()=>{ const s=document.getElementById("splash"); if(s&&s.style.display!=="none"){ s.style.opacity=0; setTimeout(()=>s.style.display="none",400); render(); } },5000);
-loadFoodDB().then(()=>render()).catch(err=>{ console.error(err); render(); });
-syncWithServer({profile,entries:{[TODAY()]:entries},history:hist});
+if(profile.fontSize) document.documentElement.style.fontSize=profile.fontSize;
+setTimeout(()=>{const s=document.getElementById("splash");if(s&&s.style.display!=="none"){s.style.opacity=0;setTimeout(()=>s.style.display="none",400);render();}},5000);
+loadFoodDB().then(()=>{render();syncWithServer({});}).catch(err=>{console.error(err);render();});
+if(profile.notifEnabled)scheduleNotification();
 </script>
 </body>
 </html>
