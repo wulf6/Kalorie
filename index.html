@@ -1725,6 +1725,12 @@ setTimeout(()=>{const s=document.getElementById("splash");if(s&&s.style.display!
 loadFoodDB().then(()=>{ render(); return syncWithServer({}); }).catch(err=>{console.error(err);render();});
 if(profile.notifEnabled) scheduleNotification();
 
+// Auto-sync každých 30 sekund
+setInterval(()=>{
+  const username = (localStorage.getItem("_sync_username")||"").trim();
+  if(username) doSync();
+}, 30000);
+
 // Force update service workeru při každém načtení
 if('serviceWorker' in navigator){
   navigator.serviceWorker.getRegistrations().then(regs=>{
