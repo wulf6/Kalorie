@@ -1433,6 +1433,7 @@ async function syncWithServer(push={}, _retry=false){
 
   try{
     const today = TODAY();
+    // Vždy pošli aktuální lokální jídla - backend merguje
     const body = {
       device_id: DEVICE_ID,
       username: username,
@@ -1535,8 +1536,24 @@ function saveSyncConfig(){
 }
 
 async function testSync(username){
-  setToast("🔄 Testuji připojení…");
+  setToast("🔄 Synchronizuji…");
   try {
+    const today = TODAY();
+
+    // Krok 1: Stáhni co je na serveru
+    const getR = await fetch(BACKEND_URL + "/data/user_" + username.toLowerCase());
+    let serverEntriesToday = [];
+    if(getR.ok){
+      const serverData = await getR.json();
+      serverEntriesToday = (serverData.entries||{})[today] || [];
+    }
+
+    // Krok 2: Merguj lokální + serverová jídla (podle id)
+    const localIds = new Set(entries.map(e=>String(e.id)));
+    const newFromServer = serverEntriesToday.filter(e=>!localIds.has(String(e.id)));
+    const mergedEntries = [...entries, ...newFromServer];
+
+    // Krok 3: Pošli merged data na server
     const r = await fetch(BACKEND_URL + "/sync", {
       method: "POST",
       headers: {"Content-Type":"application/json"},
@@ -1544,7 +1561,7 @@ async function testSync(username){
         device_id: DEVICE_ID,
         username: username,
         profile: profile,
-        entries: {[TODAY()]: entries},
+        entries: {[today]: mergedEntries},
         history: hist,
         receptar: ls("saved_foods",[])
       })
@@ -1552,8 +1569,8 @@ async function testSync(username){
     const text = await r.text();
     if(r.ok){
       const data = JSON.parse(text);
-      setToast("✅ OK! DID: " + (data.did||"?") + " · " + Object.keys(data.entries||{}).length + " dní");
-      // Aplikuj data
+      const totalItems = ((data.entries||{})[today]||[]).length;
+      setToast("✅ Sync OK · " + totalItems + " jídel dnes");
       applyServerData(data);
     } else {
       setToast("❌ Server: " + r.status + " – " + text.slice(0,80));
@@ -1572,10 +1589,16 @@ function applyServerData(data){
   }
   if(data.history){ hist = {...hist, ...data.history}; sv("hist2", hist); }
   if(data.entries){
-    const remoteToday = data.entries[today]||[];
-    const localIds = new Set(entries.map(e=>e.id));
-    const newItems = remoteToday.filter(e=>!localIds.has(e.id));
-    if(newItems.length){ entries=[...entries,...newItems]; sv("ent_"+today,entries); }
+    // Nahraď dnešní záznamy kompletním merge ze serveru
+    const serverToday = data.entries[today]||[];
+    if(serverToday.length > 0){
+      const localIds = new Set(entries.map(e=>String(e.id)));
+      const newItems = serverToday.filter(e=>!localIds.has(String(e.id)));
+      if(newItems.length){
+        entries = [...entries, ...newItems];
+        sv("ent_"+today, entries);
+      }
+    }
   }
   if(data.receptar&&data.receptar.length){
     const local=ls("saved_foods",[]); const names=new Set(local.map(f=>f.jidlo));
