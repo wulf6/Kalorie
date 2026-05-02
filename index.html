@@ -1505,6 +1505,10 @@ async function syncWithServer(push={}, _retry=false){
       if(newFoods.length) sv("saved_foods",[...localSaved,...newFoods]);
     }
 
+    // Vyčisti staré _del záznamy (starší než 24h) - nepotřebujeme je dál
+    const oneDayAgo = Date.now() - 86400000;
+    entries = entries.filter(e => !e._del || (e._t||0) > oneDayAgo);
+    sv("ent_" + today, entries);
     sv("last_sync_time", Date.now());
     render(); // vždy překresli po syncu
     setToast("☁️ Synchronizováno ✓");
@@ -1609,7 +1613,7 @@ async function doSync(){
 
     sv("last_sync_time", Date.now());
     render();
-    setSyncStatus("☁️ " + new Date().toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) + " · " + entries.length + " jídel");
+    setSyncStatus("☁️ " + new Date().toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) + " · " + entries.filter(e=>!e._del).length + " jídel");
 
   } catch(e) {
     console.warn("Sync chyba:", e.message);
