@@ -1453,16 +1453,19 @@ async function syncWithServer(push={}, _retry=false){
     if(!resp.ok) throw new Error("HTTP "+resp.status);
     const data = await resp.json();
 
-    // Aplikuj profil ze serveru (zachovej lokální klíče)
+    // Aplikuj profil ze serveru (lokální sync nastavení mají vždy přednost)
     if(data.profile && Object.keys(data.profile).length > 0){
+      // Načti sync nastavení z odděleného úložiště (nikdy se nepřepíše)
+      const localUsername = localStorage.getItem("_sync_username") || profile.syncUsername || "";
+      const localBackendUrl = localStorage.getItem("_sync_backend_url") || profile.backendUrl || "";
       const merged = {
         ...data.profile,
         geminiKey: profile.geminiKey || data.profile.geminiKey || "",
-        backendUrl: profile.backendUrl,
-        syncUsername: profile.syncUsername,
-        proxyUrl: profile.proxyUrl,
-        fontSize: profile.fontSize,
-        dark: profile.dark
+        backendUrl: localBackendUrl,
+        syncUsername: localUsername,
+        proxyUrl: profile.proxyUrl || data.profile.proxyUrl || "",
+        fontSize: profile.fontSize || data.profile.fontSize || "1.0",
+        notifEnabled: profile.notifEnabled
       };
       profile = merged;
       sv("prof2", profile);
@@ -1522,13 +1525,25 @@ function scheduleSync(){
 function saveSyncConfig(){
   const username = (document.getElementById("sync-username")||{}).value?.trim();
   const backendUrl = (document.getElementById("sync-backend-url")||{}).value?.trim().replace(/\/$/,"");
-  if(!username || !backendUrl){ setToast("Zadej uživatelské jméno i Backend URL"); return; }
+  if(!username || !backendUrl){ setToast("Zadej uzivatelske jmeno i Backend URL"); return; }
+  localStorage.setItem("_sync_username", username);
+  localStorage.setItem("_sync_backend_url", backendUrl);
   profile = {...profile, syncUsername: username, backendUrl: backendUrl};
   sv("prof2", profile);
-  setToast("✓ Sync uložen, synchronizuji…");
+  setToast("Sync ulozen, synchronizuji...");
   syncWithServer({});
   render();
 }
+
+
+
+
+
+
+
+
+
+
 
 // ── EAN Scanner ───────────────────────────────────────────────────────────────
 let _scanStream=null;
@@ -1605,6 +1620,11 @@ async function lookupBarcode(code){
 }
 
 // ── Spuštění ──────────────────────────────────────────────────────────────────
+// Obnov sync nastaveni z oddeleneho uloziste
+const _savedUsername = localStorage.getItem("_sync_username");
+const _savedBackendUrl = localStorage.getItem("_sync_backend_url");
+if(_savedUsername) profile.syncUsername = _savedUsername;
+if(_savedBackendUrl) profile.backendUrl = _savedBackendUrl;
 if(profile.fontSize) applyFontSize(profile.fontSize);
 setTimeout(()=>{const s=document.getElementById("splash");if(s&&s.style.display!=="none"){s.style.opacity=0;setTimeout(()=>s.style.display="none",400);render();}},5000);
 loadFoodDB().then(()=>{ render(); return syncWithServer({}); }).catch(err=>{console.error(err);render();});
