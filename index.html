@@ -966,7 +966,7 @@ function render(){
               </div>`
             :`<div style="font-size:11px;color:var(--muted);margin-top:6px">Data se ukládají jen lokálně dokud nezadáš jméno a URL.</div>`}
 
-          ${syncOk?`<button onclick="syncWithServer({})" style="width:100%;padding:9px;margin-top:8px;background:transparent;border:1px solid #0ea5e9;border-radius:10px;color:#0ea5e9;font-weight:600;font-size:13px;cursor:pointer">🔄 Synchronizovat teď</button>`:""}
+          ${syncOk?`<button onclick="testSync(profile.syncUsername)" style="width:100%;padding:9px;margin-top:8px;background:transparent;border:1px solid #0ea5e9;border-radius:10px;color:#0ea5e9;font-weight:600;font-size:13px;cursor:pointer">🔄 Synchronizovat teď</button>`:""}
         </div>
 
         <!-- Proxy URL -->
@@ -1420,7 +1420,7 @@ let syncTimeout = null;
 async function syncWithServer(push={}, _retry=false){
   const backendUrl = BACKEND_URL;
   const username = (localStorage.getItem("_sync_username") || profile.syncUsername || "").trim();
-  if(!username){ console.log("Sync: chybí username"); return; }
+  if(!username){ return; }
 
   // Zobraz "probouzím server" pokud byl dlouho neaktivní
   const lastSync = ls("last_sync_time", 0);
@@ -1527,8 +1527,59 @@ function saveSyncConfig(){
   localStorage.setItem("_sync_username", username);
   profile = {...profile, syncUsername: username, backendUrl: BACKEND_URL};
   sv("prof2", profile);
-  setToast("✓ Ukládám…");
-  syncWithServer({});
+  render();
+  testSync(username);
+}
+
+async function testSync(username){
+  setToast("🔄 Testuji připojení…");
+  try {
+    const r = await fetch(BACKEND_URL + "/sync", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        device_id: DEVICE_ID,
+        username: username,
+        profile: profile,
+        entries: {[TODAY()]: entries},
+        history: hist,
+        receptar: ls("saved_foods",[])
+      })
+    });
+    const text = await r.text();
+    if(r.ok){
+      const data = JSON.parse(text);
+      setToast("✅ OK! DID: " + (data.did||"?") + " · " + Object.keys(data.entries||{}).length + " dní");
+      // Aplikuj data
+      applyServerData(data);
+    } else {
+      setToast("❌ Server: " + r.status + " – " + text.slice(0,80));
+    }
+  } catch(e) {
+    setToast("❌ Chyba: " + e.message);
+  }
+}
+
+function applyServerData(data){
+  const today = TODAY();
+  const localUsername = localStorage.getItem("_sync_username") || "";
+  if(data.profile && Object.keys(data.profile).length > 0){
+    profile = {...data.profile, geminiKey: profile.geminiKey||"", backendUrl: BACKEND_URL, syncUsername: localUsername, fontSize: profile.fontSize};
+    sv("prof2", profile);
+  }
+  if(data.history){ hist = {...hist, ...data.history}; sv("hist2", hist); }
+  if(data.entries){
+    const remoteToday = data.entries[today]||[];
+    const localIds = new Set(entries.map(e=>e.id));
+    const newItems = remoteToday.filter(e=>!localIds.has(e.id));
+    if(newItems.length){ entries=[...entries,...newItems]; sv("ent_"+today,entries); }
+  }
+  if(data.receptar&&data.receptar.length){
+    const local=ls("saved_foods",[]); const names=new Set(local.map(f=>f.jidlo));
+    const newF=data.receptar.filter(f=>!names.has(f.jidlo));
+    if(newF.length) sv("saved_foods",[...local,...newF]);
+  }
+  sv("last_sync_time", Date.now());
   render();
 }
 
