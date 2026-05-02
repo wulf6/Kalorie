@@ -969,7 +969,11 @@ function render(){
               </div>`
             :`<div style="font-size:11px;color:var(--muted);margin-top:6px">Data se ukládají jen lokálně dokud nezadáš jméno a URL.</div>`}
 
-          ${syncOk?`<button onclick="testSync(profile.syncUsername)" style="width:100%;padding:9px;margin-top:8px;background:transparent;border:1px solid #0ea5e9;border-radius:10px;color:#0ea5e9;font-weight:600;font-size:13px;cursor:pointer">🔄 Synchronizovat teď</button>`:""}
+          <div id="sync-status-line" style="font-size:11px;color:var(--muted);margin-top:8px;padding:5px 10px;background:var(--surface);border-radius:8px;text-align:center">${localStorage.getItem("last_sync_status")||"Čekám na sync…"}</div>
+          ${syncOk?`<div style="display:flex;gap:8px;margin-top:8px">
+            <button onclick="doSync()" style="flex:1;padding:9px;background:transparent;border:1px solid #0ea5e9;border-radius:10px;color:#0ea5e9;font-weight:600;font-size:13px;cursor:pointer">🔄 Sync</button>
+            <button onclick="forceUpload()" style="flex:1;padding:9px;background:transparent;border:1px solid #f97316;border-radius:10px;color:#f97316;font-weight:600;font-size:13px;cursor:pointer">⬆️ Upload</button>
+          </div>`:""}
         </div>
 
         <!-- Proxy URL -->
@@ -1178,7 +1182,7 @@ function addIngToEntry(entryId){
 }
 
 function toggleExpand(id){ expanded.has(id)?expanded.delete(id):expanded.add(id); render(); }
-function removeEntry(id){ entries=entries.filter(e=>e.id!==id); sv("ent_"+TODAY(),entries); render(); syncWithServer({}); }
+function removeEntry(id){ entries=entries.filter(e=>String(e.id)!==String(id)); sv("ent_"+TODAY(),entries); render(); scheduleSync(); }
 function setTab(t){ tab=t; render(); }
 function setProfTab(t){ profTab=t; render(); }
 function toggleDark(){ dark=!dark; document.body.classList.toggle("dark",dark); sv("dark2",dark); render(); }
@@ -1537,64 +1541,55 @@ function saveSyncConfig(){
 
 async function doSync(){
   const username = (localStorage.getItem("_sync_username") || "").trim();
-  if(!username) return; // sync neni nastaven
+  if(!username) return;
 
   const today = TODAY();
 
   try {
-    // KROK 1: Stahni aktualni data ze serveru
+    // Krok 1: Stáhni ze serveru
     const getR = await fetch(BACKEND_URL + "/data/user_" + username.toLowerCase());
-    if(!getR.ok) throw new Error("GET selhal: " + getR.status);
+    if(!getR.ok) throw new Error("GET " + getR.status);
     const serverData = await getR.json();
-
-    // KROK 2: Merguj lokalni + serverova jidla pro dnes
     const serverToday = (serverData.entries || {})[today] || [];
-    const serverIds = new Set(serverToday.map(e => String(e.id)));
-    const localOnly = entries.filter(e => !serverIds.has(String(e.id)));
-    const merged = [...serverToday, ...localOnly];
 
-    // Pokud merge prinese nova jidla - uloz lokalne a vyrenderuj
-    if(localOnly.length < entries.length || serverToday.length > entries.length){
+    // Krok 2: Merge - spoj lokální a serverová (lokální mají přednost při konfliktu id)
+    const localIds = new Set(entries.map(e => String(e.id)));
+    const onlyOnServer = serverToday.filter(e => !localIds.has(String(e.id)));
+    const merged = [...entries, ...onlyOnServer];
+
+    // Aktualizuj lokální pokud přišlo něco nového
+    if(onlyOnServer.length > 0){
       entries = merged;
       sv("ent_" + today, entries);
-      render();
     }
 
-    // KROK 3: Posli merged data na server
-    const body = {
-      device_id: DEVICE_ID,
-      username: username,
-      profile: profile,
-      entries: {[today]: merged},
-      history: hist,
-      receptar: ls("saved_foods", [])
-    };
-
+    // Krok 3: Pošli merged na server
     const postR = await fetch(BACKEND_URL + "/sync", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(body)
+      body: JSON.stringify({
+        device_id: DEVICE_ID,
+        username: username,
+        profile: profile,
+        entries: {[today]: merged},
+        history: hist,
+        receptar: ls("saved_foods", [])
+      })
     });
 
-    if(!postR.ok) throw new Error("POST selhal: " + postR.status);
+    if(!postR.ok) throw new Error("POST " + postR.status);
     const result = await postR.json();
 
-    // KROK 4: Aplikuj vysledek ze serveru
-    const finalToday = (result.entries || {})[today] || [];
-    const finalIds = new Set(entries.map(e => String(e.id)));
-    const brandNew = finalToday.filter(e => !finalIds.has(String(e.id)));
-    if(brandNew.length){
-      entries = [...entries, ...brandNew];
+    // Krok 4: Přijmi případná další nová jídla z výsledku
+    const resultToday = (result.entries || {})[today] || [];
+    const mergedIds = new Set(merged.map(e => String(e.id)));
+    const extraNew = resultToday.filter(e => !mergedIds.has(String(e.id)));
+    if(extraNew.length){
+      entries = [...entries, ...extraNew];
       sv("ent_" + today, entries);
     }
 
-    // Aplikuj historii
-    if(result.history){
-      hist = {...hist, ...result.history};
-      sv("hist2", hist);
-    }
-
-    // Aplikuj receptar
+    if(result.history){ hist = {...hist, ...result.history}; sv("hist2", hist); }
     if(result.receptar && result.receptar.length){
       const local = ls("saved_foods", []);
       const names = new Set(local.map(f => f.jidlo));
@@ -1604,15 +1599,45 @@ async function doSync(){
 
     sv("last_sync_time", Date.now());
     render();
-    setToast("☁️ Sync OK · " + entries.length + " jídel dnes");
+    setSyncStatus("☁️ " + new Date().toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) + " · " + entries.length + " jídel");
 
   } catch(e) {
-    console.warn("Sync error:", e.message);
-    setToast("⚠️ Sync: " + e.message);
+    console.warn("Sync chyba:", e.message);
+    setSyncStatus("⚠️ " + e.message);
   }
 }
 
-// Alias pro zpetnou kompatibilitu
+// Vynucený upload - pošle lokální data bez ohledu na server (pro ruční opravu)
+async function forceUpload(){
+  const username = (localStorage.getItem("_sync_username") || "").trim();
+  if(!username){ setToast("Nastav uživatelské jméno"); return; }
+  const today = TODAY();
+  setSyncStatus("⬆️ Nahrávám…");
+  try{
+    const r = await fetch(BACKEND_URL + "/sync", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        device_id: DEVICE_ID,
+        username: username,
+        profile: profile,
+        entries: {[today]: entries},
+        history: hist,
+        receptar: ls("saved_foods", [])
+      })
+    });
+    if(!r.ok) throw new Error("HTTP " + r.status);
+    setSyncStatus("✅ Nahráno");
+  } catch(e){
+    setToast("❌ " + e.message);
+  }
+}
+
+function setSyncStatus(msg){
+  const el = document.getElementById("sync-status-line");
+  if(el) el.textContent = msg;
+  localStorage.setItem("last_sync_status", msg);
+}
 function testSync(username){ doSync(); }
 function syncWithServer(push={}, retry=false){ doSync(); }
 function scheduleSync(){ clearTimeout(syncTimeout); syncTimeout = setTimeout(doSync, 2000); }
