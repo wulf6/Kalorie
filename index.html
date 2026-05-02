@@ -1568,7 +1568,7 @@ async function doSync(){
     const merged = Array.from(localMap.values());
 
     // Aktualizuj lokální pokud přišlo něco nového
-    if(onlyOnServer.length > 0){
+    if(merged.length !== entries.length || merged.some((e,i)=>e._del!==entries[i]?._del)){
       entries = merged;
       sv("ent_" + today, entries);
     }
