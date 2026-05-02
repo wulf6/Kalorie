@@ -1216,7 +1216,7 @@ function updProf(k,v){ profile={...profile,[k]:v}; sv("prof2",profile); render()
 function saveApiKey(){
   const inp = document.getElementById("gemini-key-inp"); if(!inp) return;
   const key = inp.value.trim(); if(!key){ setToast("Zadej API klíč"); return; }
-  profile = {...profile, geminiKey: key}; sv("prof2", profile);
+  profile = {...profile, geminiKey: key, geminiKeyTs: Date.now()}; sv("prof2", profile);
   setToast("✓ Gemini klíč uložen!"); render();
 }
 async function testApiKey(){
@@ -1245,7 +1245,7 @@ function applyFontSize(size){
   document.documentElement.style.setProperty("--fs-xl",   (18*scale)+"px");
   document.documentElement.style.setProperty("--fs-xxl",  (24*scale)+"px");
 }
-function clearApiKey(){ profile={...profile,geminiKey:""}; sv("prof2",profile); setToast("Klíč smazán"); render(); }
+function clearApiKey(){ profile={...profile,geminiKey:"",geminiKeyTs:Date.now()}; sv("prof2",profile); setToast("Klíč smazán"); render(); }
 function confirmReset(){ showModal("Uložit dnešní jídla do historie a začít nový den?",()=>{ if(entries.length>0){hist[TODAY()]=entries;sv("hist2",hist);} entries=[]; sv("ent_"+TODAY(),entries); render(); scheduleSync(); }); }
 function showModal(msg,cb){ document.getElementById("modal-msg").innerHTML=msg; document.getElementById("modal").style.display="flex"; modalCb=cb; }
 function closeModal(){ document.getElementById("modal").style.display="none"; modalCb=null; }
@@ -1322,7 +1322,7 @@ function handlePhotoDrop(ev){ const file=ev.dataTransfer.files[0]; if(!file||!fi
 function loadPhoto(file){ _photoMime=file.type||"image/jpeg"; const reader=new FileReader(); reader.onload=e=>{_photoBase64=e.target.result.split(",")[1];document.getElementById("ai-photo-img").src=e.target.result;document.getElementById("ai-photo-preview").style.display="block";document.getElementById("ai-photo-placeholder").style.display="none";document.getElementById("ai-photo-area").style.borderColor="#6366f1";}; reader.readAsDataURL(file); }
 function clearPhoto(){ _photoBase64=null; document.getElementById("ai-photo-preview").style.display="none"; document.getElementById("ai-photo-placeholder").style.display="block"; document.getElementById("ai-photo-area").style.borderColor=""; document.getElementById("ai-photo-inp").value=""; }
 
-const GEMINI_MODELS=["gemini-1.5-flash","gemini-1.5-flash-8b","gemini-2.0-flash-exp","gemini-2.0-flash"];
+const GEMINI_MODELS=["gemini-2.5-flash","gemini-2.0-flash","gemini-1.5-flash","gemini-1.5-flash-8b","gemini-2.0-flash-lite"];
 async function callGemini(key,prompt,imageBase64=null,imageMime="image/jpeg"){
   const parts=[]; if(imageBase64)parts.push({inline_data:{mime_type:imageMime,data:imageBase64}}); parts.push({text:prompt});
   const body={contents:[{parts}]}; let lastError=null;
@@ -1498,7 +1498,13 @@ async function syncWithServer(push={}, _retry=false){
       const localUsername = localStorage.getItem("_sync_username") || profile.syncUsername || "";
       const merged = {
         ...data.profile,
-        geminiKey: profile.geminiKey || data.profile.geminiKey || "",
+        geminiKey: (()=>{
+        const localTs = profile.geminiKeyTs || 0;
+        const serverTs = data.profile.geminiKeyTs || 0;
+        if(serverTs >= localTs) return data.profile.geminiKey || profile.geminiKey || "";
+        return profile.geminiKey || data.profile.geminiKey || "";
+      })(),
+      geminiKeyTs: Math.max(profile.geminiKeyTs||0, data.profile.geminiKeyTs||0),
         backendUrl: BACKEND_URL,
         syncUsername: localUsername,
         proxyUrl: profile.proxyUrl || data.profile.proxyUrl || "",
