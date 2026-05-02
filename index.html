@@ -451,7 +451,8 @@ let dark       = ls("dark2", false);
 let tab        = "dnes";
 let entries    = ls("ent_"+TODAY(), []);
 let hist       = ls("hist2", {});
-let profile    = ls("prof2", {vaha:80,vyska:178,vek:30,pohlavi:"muz",aktivita:1.4,cilVaha:0,tempo:0.5,geminiKey:"",backendUrl:"https://kalorie-backend-ny34.onrender.com",syncUsername:""});
+const BACKEND_URL = "https://kalorie-backend-ny34.onrender.com";
+let profile    = ls("prof2", {vaha:80,vyska:178,vek:30,pohlavi:"muz",aktivita:1.4,cilVaha:0,tempo:0.5,geminiKey:"",syncUsername:""});
 let activeSlot = "Oběd";
 let addMode    = "manual";
 let loading    = false;
@@ -1417,14 +1418,15 @@ const DEVICE_ID = getDeviceId();
 let syncTimeout = null;
 
 async function syncWithServer(push={}, _retry=false){
-  const backendUrl = (profile.backendUrl||"").replace(/\/$/,"");
-  const username = (profile.syncUsername||"").trim();
-  if(!backendUrl || !username) return;
+  const backendUrl = BACKEND_URL;
+  const username = (localStorage.getItem("_sync_username") || profile.syncUsername || "").trim();
+  if(!username){ console.log("Sync: chybí username"); return; }
 
   // Zobraz "probouzím server" pokud byl dlouho neaktivní
   const lastSync = ls("last_sync_time", 0);
   const wasAsleep = (Date.now() - lastSync) > 10 * 60 * 1000; // 10 minut
   if(wasAsleep && !_retry) setToast("⏳ Probouzím server…");
+  else if(!_retry) setToast("🔄 Synchronizuji…");
 
   try{
     const today = TODAY();
@@ -1455,11 +1457,10 @@ async function syncWithServer(push={}, _retry=false){
     if(data.profile && Object.keys(data.profile).length > 0){
       // Načti sync nastavení z odděleného úložiště (nikdy se nepřepíše)
       const localUsername = localStorage.getItem("_sync_username") || profile.syncUsername || "";
-      const localBackendUrl = localStorage.getItem("_sync_backend_url") || profile.backendUrl || "";
       const merged = {
         ...data.profile,
         geminiKey: profile.geminiKey || data.profile.geminiKey || "",
-        backendUrl: localBackendUrl,
+        backendUrl: BACKEND_URL,
         syncUsername: localUsername,
         proxyUrl: profile.proxyUrl || data.profile.proxyUrl || "",
         fontSize: profile.fontSize || data.profile.fontSize || "1.0",
@@ -1520,15 +1521,13 @@ function scheduleSync(){
   syncTimeout = setTimeout(()=>syncWithServer({}), 3000);
 }
 
-const BACKEND_URL = "https://kalorie-backend-ny34.onrender.com";
 function saveSyncConfig(){
   const username = (document.getElementById("sync-username")||{}).value?.trim();
   if(!username){ setToast("Zadej uživatelské jméno"); return; }
   localStorage.setItem("_sync_username", username);
-  localStorage.setItem("_sync_backend_url", BACKEND_URL);
   profile = {...profile, syncUsername: username, backendUrl: BACKEND_URL};
   sv("prof2", profile);
-  setToast("✓ Sync uložen, synchronizuji…");
+  setToast("✓ Ukládám…");
   syncWithServer({});
   render();
 }
@@ -1618,11 +1617,9 @@ async function lookupBarcode(code){
 }
 
 // ── Spuštění ──────────────────────────────────────────────────────────────────
-// Obnov sync nastaveni z oddeleneho uloziste
+// Obnov sync username z odděleného úložiště
 const _savedUsername = localStorage.getItem("_sync_username");
-const _savedBackendUrl = localStorage.getItem("_sync_backend_url");
 if(_savedUsername) profile.syncUsername = _savedUsername;
-if(_savedBackendUrl) profile.backendUrl = _savedBackendUrl;
 if(profile.fontSize) applyFontSize(profile.fontSize);
 setTimeout(()=>{const s=document.getElementById("splash");if(s&&s.style.display!=="none"){s.style.opacity=0;setTimeout(()=>s.style.display="none",400);render();}},5000);
 loadFoodDB().then(()=>{ render(); return syncWithServer({}); }).catch(err=>{console.error(err);render();});
