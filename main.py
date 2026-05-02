@@ -75,6 +75,21 @@ class SyncBody(BaseModel):
     history: Optional[dict] = None
     receptar: Optional[list] = None
 
+def merge_entries(server_items: list, incoming: list) -> list:
+    """Merge dvou seznamů jídel - vyhraj vždy záznam s novějším _t timestampem."""
+    merged = {str(e.get("id")): e for e in server_items}
+    for item in incoming:
+        key = str(item.get("id"))
+        if key not in merged:
+            merged[key] = item
+        else:
+            # Vyhraj novější _t
+            server_t = merged[key].get("_t", 0) or 0
+            incoming_t = item.get("_t", 0) or 0
+            if incoming_t > server_t:
+                merged[key] = item
+    return list(merged.values())
+
 @app.get("/")
 def home():
     return {"status": "OK", "message": "Kalorie backend běží!"}
@@ -91,46 +106,32 @@ def sync(body: SyncBody):
     with get_db() as con:
         con.execute("INSERT OR IGNORE INTO users(device_id) VALUES(?)", (did,))
 
-        # Profil - ulož vždy
         if body.profile:
             con.execute("""
                 INSERT INTO profile(device_id, data, updated_at) VALUES(?,?,?)
                 ON CONFLICT(device_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at
             """, (did, json.dumps(body.profile), now))
 
-        # Entries - MERGE podle id položky
         if body.entries:
             for date, incoming in body.entries.items():
-                # Načti co už je na serveru
                 row = con.execute(
                     "SELECT data FROM entries WHERE device_id=? AND date=?", (did, date)
                 ).fetchone()
 
-                if row:
-                    server_items = json.loads(row["data"])
-                    server_ids = {str(e.get("id")) for e in server_items}
-                    # Přidej jen nové položky které server ještě nemá
-                    for item in incoming:
-                        if str(item.get("id")) not in server_ids:
-                            server_items.append(item)
-                            server_ids.add(str(item.get("id")))
-                    merged = server_items
-                else:
-                    merged = incoming
+                server_items = json.loads(row["data"]) if row else []
+                merged = merge_entries(server_items, incoming)
 
                 con.execute("""
                     INSERT INTO entries(device_id, date, data, updated_at) VALUES(?,?,?,?)
                     ON CONFLICT(device_id, date) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at
                 """, (did, date, json.dumps(merged), now))
 
-        # Historie - ulož jen pokud ještě není
         if body.history:
             for date, items in body.history.items():
                 con.execute("""
                     INSERT OR IGNORE INTO history(device_id, date, data, updated_at) VALUES(?,?,?,?)
                 """, (did, date, json.dumps(items), now))
 
-        # Receptář
         if body.receptar is not None:
             for recept in body.receptar:
                 name = recept.get("jidlo", "")
@@ -141,7 +142,6 @@ def sync(body: SyncBody):
                     ON CONFLICT(device_id, name) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at
                 """, (did, name, json.dumps(recept), now))
 
-        # Vrať kompletní mergovaná data
         prof_row = con.execute("SELECT data FROM profile WHERE device_id=?", (did,)).fetchone()
         entries_rows = con.execute("SELECT date, data FROM entries WHERE device_id=?", (did,)).fetchall()
         hist_rows = con.execute("SELECT date, data FROM history WHERE device_id=?", (did,)).fetchall()
@@ -169,10 +169,3 @@ def get_all(device_id: str):
         "history": {r["date"]: json.loads(r["data"]) for r in hist},
         "receptar": [json.loads(r["data"]) for r in recs],
     }
-
-# Endpoint pro ruční opravu - smaže dnešní záznamy a nechá je znovu mergovat
-@app.delete("/entries/{device_id}/{date}")
-def delete_entries(device_id: str, date: str):
-    with get_db() as con:
-        con.execute("DELETE FROM entries WHERE device_id=? AND date=?", (device_id, date))
-    return {"ok": True}
