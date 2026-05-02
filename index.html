@@ -1322,7 +1322,7 @@ function handlePhotoDrop(ev){ const file=ev.dataTransfer.files[0]; if(!file||!fi
 function loadPhoto(file){ _photoMime=file.type||"image/jpeg"; const reader=new FileReader(); reader.onload=e=>{_photoBase64=e.target.result.split(",")[1];document.getElementById("ai-photo-img").src=e.target.result;document.getElementById("ai-photo-preview").style.display="block";document.getElementById("ai-photo-placeholder").style.display="none";document.getElementById("ai-photo-area").style.borderColor="#6366f1";}; reader.readAsDataURL(file); }
 function clearPhoto(){ _photoBase64=null; document.getElementById("ai-photo-preview").style.display="none"; document.getElementById("ai-photo-placeholder").style.display="block"; document.getElementById("ai-photo-area").style.borderColor=""; document.getElementById("ai-photo-inp").value=""; }
 
-const GEMINI_MODELS=["gemini-2.5-flash","gemini-2.0-flash","gemini-1.5-flash","gemini-1.5-flash-8b","gemini-2.0-flash-lite"];
+const GEMINI_MODELS=["gemini-2.5-flash-preview-04-17","gemini-2.5-flash","gemini-1.5-flash","gemini-1.5-flash-8b"];
 async function callGemini(key,prompt,imageBase64=null,imageMime="image/jpeg"){
   const parts=[]; if(imageBase64)parts.push({inline_data:{mime_type:imageMime,data:imageBase64}}); parts.push({text:prompt});
   const body={contents:[{parts}]}; let lastError=null;
@@ -1333,6 +1333,7 @@ async function callGemini(key,prompt,imageBase64=null,imageMime="image/jpeg"){
       else{const url=`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;resp=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});}
       const data=await resp.json(); if(resp.status===200)return data;
       if(resp.status===404||(data?.error?.message||"").includes("not found"))continue;
+      if((data?.error?.message||"").includes("quota")||(data?.error?.message||"").includes("limit: 0")||(data?.error?.message||"").includes("RESOURCE_EXHAUSTED"))continue;
       throw new Error(data?.error?.message||"HTTP "+resp.status);
     }catch(e){lastError=e;if(e.message.includes("model_not_found")||e.message.includes("404"))continue;throw e;}
   }
