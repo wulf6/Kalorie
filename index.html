@@ -226,7 +226,7 @@ input:focus,textarea:focus{scroll-margin-bottom:120px}
           <input class="inp" type="number" id="m-kcal" placeholder="0"/>
         </div>
         <div>
-          <label id="m-g-label" style="font-size:11px;font-weight:600;color:var(--muted);display:block;margin-bottom:4px;padding-left:2px">GRAMY (g)</label>
+          <label id="m-g-label" style="font-size:11px;font-weight:600;color:var(--muted);display:block;margin-bottom:4px;padding-left:2px">MNOŽSTVÍ (g/ml)</label>
           <input class="inp" type="number" id="m-g" placeholder="100" value="100" onchange="onManualGrams()" onblur="onManualGrams()"/>
         </div>
       </div>
@@ -635,11 +635,11 @@ function render(){
       <div class="card" style="padding:14px;margin-bottom:12px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
           <span style="font-weight:700;color:#3b82f6">💧 Tekutiny</span>
-          <span style="font-size:13px;font-weight:700;color:#3b82f6">${T.voda} / ${tg.voda} ml</span>
+          <span style="font-size:13px;font-weight:700;color:#3b82f6">${Math.round(T.voda)} / ${tg.voda} ml</span>
         </div>
         <div class="prog-bar"><div class="prog-fill" style="width:${vodaPct}%;background:linear-gradient(90deg,#3b82f6,#60a5fa)"></div></div>
         <div style="font-size:12px;color:${T.voda>=tg.voda?"#22c55e":"#3b82f6"};margin-top:5px;text-align:right">
-          ${T.voda>=tg.voda?"✓ Splněno!":"zbývá "+(tg.voda-T.voda)+" ml"}
+          ${T.voda>=tg.voda?"✓ Splněno!":"zbývá "+Math.round(tg.voda-T.voda)+" ml"}
         </div>
       </div>
       ${(()=>{
@@ -1094,7 +1094,7 @@ function entryHTML(e){ if(e._del) return "";
       <span style="font-size:20px">${icon}</span>
       <div style="flex:1;min-width:0">
         <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.jidlo}</div>
-        <div style="font-size:11px;color:var(--muted)">${e.porce_g}g · ${e.slot}</div>
+        <div style="font-size:11px;color:var(--muted)">${e.porce_g}${(e.isWater||isLiquid(e.jidlo))?"ml":"g"} · ${e.slot}</div>
         ${e.b?`<div style="font-size:11px;color:var(--muted)">B:${(e.b).toFixed(1)} S:${(e.s).toFixed(1)} T:${(e.t).toFixed(1)}</div>`:""}
       </div>
       <div style="text-align:right;flex-shrink:0">
@@ -1110,7 +1110,7 @@ function entryHTML(e){ if(e._del) return "";
           <input type="number" value="${e.porce_g}" min="1" max="9999" id="gram-inp-${e.id}"
             style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:15px;outline:none"
             onkeydown="if(event.key==='Enter')applyGram(${e.id})"/>
-          <span style="color:var(--muted);font-size:13px">g</span>
+          <span style="color:var(--muted);font-size:13px">${(e.isWater||isLiquid(e.jidlo))?"ml":"g"}</span>
           <button onclick="applyGram(${e.id})" style="padding:8px 14px;background:#6366f1;border:none;border-radius:8px;color:#fff;font-weight:700;cursor:pointer;font-size:13px">OK</button>
         </div>
       </div>
@@ -1328,7 +1328,7 @@ async function handleAI(){
     const parsed=JSON.parse(raw);
     if(!parsed.jidlo||typeof parsed.kcal!=="number")throw new Error("Neplatná data");
     addEntry({...parsed,porce_g:parsed.porce_g||g,source:"ai"});
-    document.getElementById("ai-input").value=""; clearPhoto();
+    document.getElementById("ai-input").value=""; document.getElementById("ai-g").value="100"; clearPhoto(); hideGlobalSuggest();
     showOk(parsed.jidlo+" přidáno ("+Math.round(parsed.kcal)+" kcal)");
     setTimeout(closeAdd,1200);
   }catch(e){showErr("Chyba: "+e.message);}
@@ -1394,10 +1394,17 @@ document.addEventListener("touchstart",e=>{const sug=document.getElementById("g-
 let _currentManualEntry=null;
 function onManualInput(){ const inp=document.getElementById("m-name");if(!inp)return; _currentManualEntry=null; document.getElementById("m-autofill-info").style.display="none"; const q=inp.value.trim();if(q.length<1){hideGlobalSuggest();return;} const matches=searchDB(q,10);if(!matches.length){hideGlobalSuggest();return;} showGlobalSuggest(inp,matches,selectManualSug); }
 function selectManualSug(entry){ _currentManualEntry=entry; const inp=document.getElementById("m-name");if(inp)inp.value=entry[0]; hideGlobalSuggest(); const tg=getTypicalGrams(entry[0]); const gInp=document.getElementById("m-g");if(gInp)gInp.value=tg; fillManualFromEntry(entry,tg); }
-function fillManualFromEntry(entry,g){ const r=(parseFloat(g)||100)/100; const set=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v;}; set("m-kcal",Math.round(entry[1]*r));set("m-b",(entry[2]*r).toFixed(1));set("m-s",(entry[3]*r).toFixed(1));set("m-t",(entry[4]*r).toFixed(1));set("m-vl",((entry[5]||0)*r).toFixed(1)); const info=document.getElementById("m-autofill-info"); if(info){info.textContent="✓ Načteno z databáze";info.style.display="block";} }
+function fillManualFromEntry(entry,g){ const r=(parseFloat(g)||100)/100; const liquid=isLiquid(entry[0]); const glabel=document.getElementById("m-g-label"); if(glabel)glabel.textContent=liquid?"MNOŽSTVÍ (ml)":"MNOŽSTVÍ (g)"; const set=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v;}; set("m-kcal",Math.round(entry[1]*r));set("m-b",(entry[2]*r).toFixed(1));set("m-s",(entry[3]*r).toFixed(1));set("m-t",(entry[4]*r).toFixed(1));set("m-vl",((entry[5]||0)*r).toFixed(1)); const info=document.getElementById("m-autofill-info"); if(info){info.textContent="✓ Načteno z databáze";info.style.display="block";} }
 function onManualGrams(){ if(!_currentManualEntry)return; const g=parseFloat(document.getElementById("m-g")?.value)||100; fillManualFromEntry(_currentManualEntry,g); }
 function onManualKey(ev){ if(ev.key==="Escape"){hideGlobalSuggest();return;} if(ev.key==="Enter"){ev.preventDefault();hideGlobalSuggest();handleManual();} }
-function handleManual(){ const name=document.getElementById("m-name").value.trim();if(!name){showErr("Zadej název.");return;} const liquid=isLiquid(name); const g=parseFloat(document.getElementById("m-g").value)||(liquid?250:100); const kcal=parseFloat(document.getElementById("m-kcal").value)||0; if(!liquid&&!kcal){showErr("Zadej kalorie.");return;} addEntry({jidlo:name,porce_g:g,kcal,b:parseFloat(document.getElementById("m-b").value)||0,s:parseFloat(document.getElementById("m-s").value)||0,t:parseFloat(document.getElementById("m-t").value)||0,vl:parseFloat(document.getElementById("m-vl").value)||0,isWater:liquid,source:"manual"}); closeAdd(); }
+function handleManual(){ const name=document.getElementById("m-name").value.trim();if(!name){showErr("Zadej název.");return;}   const liquid=isLiquid(name); const g=parseFloat(document.getElementById("m-g").value)||(liquid?250:100); const kcal=parseFloat(document.getElementById("m-kcal").value)||0; if(!liquid&&!kcal){showErr("Zadej kalorie.");return;} addEntry({jidlo:name,porce_g:g,kcal,b:parseFloat(document.getElementById("m-b").value)||0,s:parseFloat(document.getElementById("m-s").value)||0,t:parseFloat(document.getElementById("m-t").value)||0,vl:parseFloat(document.getElementById("m-vl").value)||0,isWater:liquid,source:"manual"});
+  // Vyčisti formulář
+  ["m-name","m-kcal","m-b","m-s","m-t","m-vl"].forEach(id=>{const el=document.getElementById(id);if(el)el.value="";});
+  document.getElementById("m-g").value="100";
+  document.getElementById("m-autofill-info").style.display="none";
+  _currentManualEntry=null;
+  hideGlobalSuggest();
+  closeAdd(); }
 
 function onRecInput(){ const inp=document.getElementById("rec-name");if(!inp)return; if(inp.value.trim().length<1){hideGlobalSuggest();return;} const matches=searchDB(inp.value,10);if(!matches.length){hideGlobalSuggest();return;} showGlobalSuggest(inp,matches,(entry)=>{inp.value=entry[0];const gInp=document.getElementById("rec-gram");if(gInp)gInp.value=getTypicalGrams(entry[0]);hideGlobalSuggest();}); }
 function onRecKey(ev){ if(ev.key==="Enter"){ev.preventDefault();addRecipeItem();} if(ev.key==="Escape")hideGlobalSuggest(); }
