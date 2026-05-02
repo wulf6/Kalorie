@@ -489,7 +489,7 @@ function targets(){
     voda: p.vodaCil || Math.round(p.vaha*35) };
 }
 function totals(){
-  return entries.reduce((a,e)=>({
+  return entries.filter(e=>!e._del).reduce((a,e)=>({
     kcal: a.kcal+(e.kcal||0), b: a.b+(e.b||0), s: a.s+(e.s||0),
     t: a.t+(e.t||0), vl: a.vl+(e.vl||0),
     voda: a.voda+(e.isWater?e.porce_g:0)
@@ -526,7 +526,7 @@ function render(){
   const kcalLimit = tg.cilKcal;
   const kcalPct   = Math.min(T.kcal/kcalLimit*100,100);
   const vodaPct   = Math.min(T.voda/tg.voda*100,100);
-  const bySlot    = SLOTS.map(s=>({slot:s,items:entries.filter(e=>e.slot===s)}));
+  const bySlot    = SLOTS.map(s=>({slot:s,items:entries.filter(e=>e.slot===s&&!e._del)}));
 
   let html = `<div style="min-height:100vh;padding-bottom:80px;max-width:1200px;margin:0 auto">
   <div class="sticky-header" style="background:var(--card);border-bottom:1px solid var(--border);padding:0 14px;position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between">
@@ -1085,7 +1085,7 @@ function render(){
 
 }
 
-function entryHTML(e){
+function entryHTML(e){ if(e._del) return ""; 
   const open = expanded.has(e.id);
   const icon = e.source==="barcode"?"📦":e.source==="recept"?"👨‍🍳":e.source==="moje"?"⭐":e.source==="manual"?"✏️":"🤖";
   const isMoje = e.source==="moje" || e.source==="recept";
@@ -1130,7 +1130,7 @@ function applyGram(id){
   entries = entries.map(e=>{
     if(e.id!==id) return e;
     const ratio = newG / (e.porce_g||100);
-    return {...e, porce_g:Math.round(newG), kcal:(e.kcal||0)*ratio, b:(e.b||0)*ratio, s:(e.s||0)*ratio, t:(e.t||0)*ratio, vl:(e.vl||0)*ratio};
+    return {...e, porce_g:Math.round(newG), kcal:(e.kcal||0)*ratio, b:(e.b||0)*ratio, s:(e.s||0)*ratio, t:(e.t||0)*ratio, vl:(e.vl||0)*ratio, _t:Date.now()};
   });
   sv("ent_"+TODAY(), entries);
   render();
@@ -1182,7 +1182,7 @@ function addIngToEntry(entryId){
 }
 
 function toggleExpand(id){ expanded.has(id)?expanded.delete(id):expanded.add(id); render(); }
-function removeEntry(id){ entries=entries.filter(e=>String(e.id)!==String(id)); sv("ent_"+TODAY(),entries); render(); scheduleSync(); }
+function removeEntry(id){ entries=entries.map(e=>String(e.id)===String(id)?{...e,_del:true,_t:Date.now()}:e); sv("ent_"+TODAY(),entries); render(); scheduleSync(); }
 function setTab(t){ tab=t; render(); }
 function setProfTab(t){ profTab=t; render(); }
 function toggleDark(){ dark=!dark; document.body.classList.toggle("dark",dark); sv("dark2",dark); render(); }
@@ -1222,7 +1222,7 @@ function applyFontSize(size){
   document.documentElement.style.setProperty("--fs-xxl",  (24*scale)+"px");
 }
 function clearApiKey(){ profile={...profile,geminiKey:""}; sv("prof2",profile); setToast("Klíč smazán"); render(); }
-function confirmReset(){ showModal("Uložit dnešní jídla do historie a začít nový den?",()=>{ if(entries.length>0){hist[TODAY()]=entries;sv("hist2",hist);} entries=[]; sv("ent_"+TODAY(),entries); render(); syncWithServer({}); }); }
+function confirmReset(){ showModal("Uložit dnešní jídla do historie a začít nový den?",()=>{ if(entries.length>0){hist[TODAY()]=entries;sv("hist2",hist);} entries=[]; sv("ent_"+TODAY(),entries); render(); scheduleSync(); }); }
 function showModal(msg,cb){ document.getElementById("modal-msg").innerHTML=msg; document.getElementById("modal").style.display="flex"; modalCb=cb; }
 function closeModal(){ document.getElementById("modal").style.display="none"; modalCb=null; }
 function modalYes(){ if(modalCb)modalCb(); closeModal(); }
@@ -1552,10 +1552,20 @@ async function doSync(){
     const serverData = await getR.json();
     const serverToday = (serverData.entries || {})[today] || [];
 
-    // Krok 2: Merge - spoj lokální a serverová (lokální mají přednost při konfliktu id)
-    const localIds = new Set(entries.map(e => String(e.id)));
-    const onlyOnServer = serverToday.filter(e => !localIds.has(String(e.id)));
-    const merged = [...entries, ...onlyOnServer];
+    // Krok 2: Merge - vyhraj vždy záznam s novějším _t timestampem
+    const localMap = new Map(entries.map(e => [String(e.id), e]));
+    for(const se of serverToday){
+      const key = String(se.id);
+      const local = localMap.get(key);
+      if(!local){
+        // Nové jídlo ze serveru - přidej jen pokud není smazané lokálně
+        localMap.set(key, se);
+      } else {
+        // Konflikt - vyhraj novější _t
+        if((se._t||0) > (local._t||0)) localMap.set(key, se);
+      }
+    }
+    const merged = Array.from(localMap.values());
 
     // Aktualizuj lokální pokud přišlo něco nového
     if(onlyOnServer.length > 0){
