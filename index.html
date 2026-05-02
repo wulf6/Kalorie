@@ -516,7 +516,7 @@ function totals(){
   return entries.filter(e=>!e._del).reduce((a,e)=>({
     kcal: a.kcal+(e.kcal||0), b: a.b+(e.b||0), s: a.s+(e.s||0),
     t: a.t+(e.t||0), vl: a.vl+(e.vl||0),
-    voda: a.voda+(e.isWater?e.porce_g:0)
+    voda: a.voda+((e.isWater||isLiquid(e.jidlo))?e.porce_g:0)
   }),{kcal:0,b:0,s:0,t:0,vl:0,voda:0});
 }
 
@@ -545,6 +545,8 @@ function ring(value, max, color, label, unit, big=false){
 }
 
 function render(){
+  // Ujisti se že smazané položky nejsou v entries
+  entries = entries.filter(e => e !== undefined);
   const T  = totals();
   const tg = targets();
   const kcalLimit = tg.cilKcal;
@@ -1441,7 +1443,7 @@ function cancelEdit(){ editId=null;recipe=[];render(); }
 function logActivity(){ const sel=document.getElementById("act-select"),minEl=document.getElementById("act-min");if(!sel||!minEl)return; const met=parseFloat(sel.value)||3.5; const name=sel.options[sel.selectedIndex]?.dataset?.name||sel.options[sel.selectedIndex]?.text||"Aktivita"; const min=parseFloat(minEl.value)||30,kcal=Math.round(met*profile.vaha*(min/60)); const log=ls("act_log",[]);log.push({id:Date.now(),d:TODAY(),name,min,met,kcal});sv("act_log",log); setToast("✓ "+name+" (−"+kcal+" kcal)");render(); }
 function deleteActivity(id){ sv("act_log",ls("act_log",[]).filter(a=>String(a.id)!==String(id)));render(); }
 
-function showMacroDetail(label,type){ const modal=document.getElementById("macro-detail-modal");if(!modal)return; document.getElementById("macro-detail-title").textContent=label; const keyMap={protein:"b",carbs:"s",fat:"t",fiber:"vl"},key=keyMap[type]||"b"; const items=entries.filter(e=>e[key]>0).sort((a,b)=>b[key]-a[key]); const total=entries.reduce((s,e)=>s+(e[key]||0),0); document.getElementById("macro-detail-list").innerHTML=items.map(e=>`<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>${e.jidlo} <span style="color:var(--muted)">${e.porce_g}g</span></span><span style="font-weight:700">${(e[key]||0).toFixed(1)}g</span></div>`).join(""); document.getElementById("macro-detail-total").textContent="Celkem: "+total.toFixed(1)+"g"; modal.style.display="flex"; }
+function showMacroDetail(label,type){ const modal=document.getElementById("macro-detail-modal");if(!modal)return; document.getElementById("macro-detail-title").textContent=label; const keyMap={protein:"b",carbs:"s",fat:"t",fiber:"vl"},key=keyMap[type]||"b"; const items=entries.filter(e=>!e._del&&e[key]>0).sort((a,b)=>b[key]-a[key]); const total=entries.filter(e=>!e._del).reduce((s,e)=>s+(e[key]||0),0); document.getElementById("macro-detail-list").innerHTML=items.map(e=>`<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>${e.jidlo} <span style="color:var(--muted)">${e.porce_g}g</span></span><span style="font-weight:700">${(e[key]||0).toFixed(1)}g</span></div>`).join(""); document.getElementById("macro-detail-total").textContent="Celkem: "+total.toFixed(1)+"g"; modal.style.display="flex"; }
 function closeMacroDetail(){ const m=document.getElementById("macro-detail-modal");if(m)m.style.display="none"; }
 function logWeight(){ const inp=document.getElementById("w-inp");if(!inp)return; const w=parseFloat(inp.value);if(isNaN(w)||w<20||w>300){setToast("Neplatná hodnota");return;} const log=ls("weight_log",[]);log.push({d:TODAY(),w});sv("weight_log",log); setToast("✓ "+w+" kg uloženo");render(); }
 function deleteWeight(date){ sv("weight_log",ls("weight_log",[]).filter(e=>e.d!==date));render(); }
@@ -1476,7 +1478,8 @@ async function syncWithServer(push={}, _retry=false){
       profile: profile,
       entries: {[today]: entries},
       history: hist,
-      receptar: ls("saved_foods",[])
+      receptar: ls("saved_foods",[]),
+      aktivity: ls("act_log",[])
     };
 
     const controller = new AbortController();
@@ -1642,6 +1645,14 @@ async function doSync(){
     }
 
     if(result.history){ hist = {...hist, ...result.history}; sv("hist2", hist); }
+    // Aplikuj aktivity
+    if(result.aktivity && result.aktivity.length){
+      const localActs = ls("act_log",[]);
+      const localActIds = new Set(localActs.map(a=>String(a.id)));
+      const newActs = result.aktivity.filter(a=>!localActIds.has(String(a.id)));
+      if(newActs.length) sv("act_log",[...localActs,...newActs]);
+    }
+
     if(result.receptar && result.receptar.length){
       const local = ls("saved_foods", []);
       const names = new Set(local.map(f => f.jidlo));
