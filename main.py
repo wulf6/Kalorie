@@ -4,7 +4,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
@@ -81,7 +81,6 @@ def home():
 
 @app.post("/sync")
 def sync(body: SyncBody):
-    # Sdílené ID podle username
     if body.username and body.username.strip():
         did = "user_" + body.username.lower().strip()
     else:
@@ -92,44 +91,43 @@ def sync(body: SyncBody):
     with get_db() as con:
         con.execute("INSERT OR IGNORE INTO users(device_id) VALUES(?)", (did,))
 
-        # Profil - ulož vždy nejnovější
+        # Profil - ulož vždy
         if body.profile:
             con.execute("""
                 INSERT INTO profile(device_id, data, updated_at) VALUES(?,?,?)
                 ON CONFLICT(device_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at
             """, (did, json.dumps(body.profile), now))
 
-        # Entries - MERGE: spoj záznamy ze serveru s novými ze zařízení
+        # Entries - MERGE podle id položky
         if body.entries:
-            for date, new_items in body.entries.items():
-                # Načti existující záznamy pro tento den ze serveru
-                existing_row = con.execute(
+            for date, incoming in body.entries.items():
+                # Načti co už je na serveru
+                row = con.execute(
                     "SELECT data FROM entries WHERE device_id=? AND date=?", (did, date)
                 ).fetchone()
 
-                if existing_row:
-                    existing_items = json.loads(existing_row["data"])
-                    # Merge: přidej jen položky které ještě nejsou (podle id)
-                    existing_ids = {str(e.get("id")) for e in existing_items}
-                    for item in new_items:
-                        if str(item.get("id")) not in existing_ids:
-                            existing_items.append(item)
-                            existing_ids.add(str(item.get("id")))
-                    merged = existing_items
+                if row:
+                    server_items = json.loads(row["data"])
+                    server_ids = {str(e.get("id")) for e in server_items}
+                    # Přidej jen nové položky které server ještě nemá
+                    for item in incoming:
+                        if str(item.get("id")) not in server_ids:
+                            server_items.append(item)
+                            server_ids.add(str(item.get("id")))
+                    merged = server_items
                 else:
-                    merged = new_items
+                    merged = incoming
 
                 con.execute("""
                     INSERT INTO entries(device_id, date, data, updated_at) VALUES(?,?,?,?)
                     ON CONFLICT(device_id, date) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at
                 """, (did, date, json.dumps(merged), now))
 
-        # Historie
+        # Historie - ulož jen pokud ještě není
         if body.history:
             for date, items in body.history.items():
                 con.execute("""
-                    INSERT INTO history(device_id, date, data, updated_at) VALUES(?,?,?,?)
-                    ON CONFLICT(device_id, date) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at
+                    INSERT OR IGNORE INTO history(device_id, date, data, updated_at) VALUES(?,?,?,?)
                 """, (did, date, json.dumps(items), now))
 
         # Receptář
@@ -143,7 +141,7 @@ def sync(body: SyncBody):
                     ON CONFLICT(device_id, name) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at
                 """, (did, name, json.dumps(recept), now))
 
-        # Vrať kompletní data
+        # Vrať kompletní mergovaná data
         prof_row = con.execute("SELECT data FROM profile WHERE device_id=?", (did,)).fetchone()
         entries_rows = con.execute("SELECT date, data FROM entries WHERE device_id=?", (did,)).fetchall()
         hist_rows = con.execute("SELECT date, data FROM history WHERE device_id=?", (did,)).fetchall()
@@ -171,3 +169,10 @@ def get_all(device_id: str):
         "history": {r["date"]: json.loads(r["data"]) for r in hist},
         "receptar": [json.loads(r["data"]) for r in recs],
     }
+
+# Endpoint pro ruční opravu - smaže dnešní záznamy a nechá je znovu mergovat
+@app.delete("/entries/{device_id}/{date}")
+def delete_entries(device_id: str, date: str):
+    with get_db() as con:
+        con.execute("DELETE FROM entries WHERE device_id=? AND date=?", (device_id, date))
+    return {"ok": True}
