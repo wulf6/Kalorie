@@ -1535,89 +1535,87 @@ function saveSyncConfig(){
   testSync(username);
 }
 
-async function testSync(username){
-  setToast("🔄 Synchronizuji…");
-  try {
-    const today = TODAY();
+async function doSync(){
+  const username = (localStorage.getItem("_sync_username") || "").trim();
+  if(!username) return; // sync neni nastaven
 
-    // Krok 1: Stáhni co je na serveru
-    const getR = await fetch(BACKEND_URL + "/data/user_" + username.toLowerCase());
-    let serverEntriesToday = [];
-    if(getR.ok){
-      const serverData = await getR.json();
-      serverEntriesToday = (serverData.entries||{})[today] || [];
-    }
-
-    // Krok 2: Merguj lokální + serverová jídla (podle id)
-    const localIds = new Set(entries.map(e=>String(e.id)));
-    const newFromServer = serverEntriesToday.filter(e=>!localIds.has(String(e.id)));
-    const mergedEntries = [...entries, ...newFromServer];
-
-    // Krok 3: Pošli merged data na server
-    const r = await fetch(BACKEND_URL + "/sync", {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({
-        device_id: DEVICE_ID,
-        username: username,
-        profile: profile,
-        entries: {[today]: mergedEntries},
-        history: hist,
-        receptar: ls("saved_foods",[])
-      })
-    });
-    const text = await r.text();
-    if(r.ok){
-      const data = JSON.parse(text);
-      const totalItems = ((data.entries||{})[today]||[]).length;
-      setToast("✅ Sync OK · " + totalItems + " jídel dnes");
-      applyServerData(data);
-    } else {
-      setToast("❌ Server: " + r.status + " – " + text.slice(0,80));
-    }
-  } catch(e) {
-    setToast("❌ Chyba: " + e.message);
-  }
-}
-
-function applyServerData(data){
   const today = TODAY();
-  const localUsername = localStorage.getItem("_sync_username") || "";
-  if(data.profile && Object.keys(data.profile).length > 0){
-    profile = {...data.profile, geminiKey: profile.geminiKey||"", backendUrl: BACKEND_URL, syncUsername: localUsername, fontSize: profile.fontSize};
-    sv("prof2", profile);
-  }
-  if(data.history){ hist = {...hist, ...data.history}; sv("hist2", hist); }
-  if(data.entries){
-    // Nahraď dnešní záznamy kompletním merge ze serveru
-    const serverToday = data.entries[today]||[];
-    if(serverToday.length > 0){
-      const localIds = new Set(entries.map(e=>String(e.id)));
-      const newItems = serverToday.filter(e=>!localIds.has(String(e.id)));
-      if(newItems.length){
-        entries = [...entries, ...newItems];
-        sv("ent_"+today, entries);
-      }
+
+  try {
+    // KROK 1: Stahni aktualni data ze serveru
+    const getR = await fetch(BACKEND_URL + "/data/user_" + username.toLowerCase());
+    if(!getR.ok) throw new Error("GET selhal: " + getR.status);
+    const serverData = await getR.json();
+
+    // KROK 2: Merguj lokalni + serverova jidla pro dnes
+    const serverToday = (serverData.entries || {})[today] || [];
+    const serverIds = new Set(serverToday.map(e => String(e.id)));
+    const localOnly = entries.filter(e => !serverIds.has(String(e.id)));
+    const merged = [...serverToday, ...localOnly];
+
+    // Pokud merge prinese nova jidla - uloz lokalne a vyrenderuj
+    if(localOnly.length < entries.length || serverToday.length > entries.length){
+      entries = merged;
+      sv("ent_" + today, entries);
+      render();
     }
+
+    // KROK 3: Posli merged data na server
+    const body = {
+      device_id: DEVICE_ID,
+      username: username,
+      profile: profile,
+      entries: {[today]: merged},
+      history: hist,
+      receptar: ls("saved_foods", [])
+    };
+
+    const postR = await fetch(BACKEND_URL + "/sync", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body)
+    });
+
+    if(!postR.ok) throw new Error("POST selhal: " + postR.status);
+    const result = await postR.json();
+
+    // KROK 4: Aplikuj vysledek ze serveru
+    const finalToday = (result.entries || {})[today] || [];
+    const finalIds = new Set(entries.map(e => String(e.id)));
+    const brandNew = finalToday.filter(e => !finalIds.has(String(e.id)));
+    if(brandNew.length){
+      entries = [...entries, ...brandNew];
+      sv("ent_" + today, entries);
+    }
+
+    // Aplikuj historii
+    if(result.history){
+      hist = {...hist, ...result.history};
+      sv("hist2", hist);
+    }
+
+    // Aplikuj receptar
+    if(result.receptar && result.receptar.length){
+      const local = ls("saved_foods", []);
+      const names = new Set(local.map(f => f.jidlo));
+      const newF = result.receptar.filter(f => !names.has(f.jidlo));
+      if(newF.length) sv("saved_foods", [...local, ...newF]);
+    }
+
+    sv("last_sync_time", Date.now());
+    render();
+    setToast("☁️ Sync OK · " + entries.length + " jídel dnes");
+
+  } catch(e) {
+    console.warn("Sync error:", e.message);
+    setToast("⚠️ Sync: " + e.message);
   }
-  if(data.receptar&&data.receptar.length){
-    const local=ls("saved_foods",[]); const names=new Set(local.map(f=>f.jidlo));
-    const newF=data.receptar.filter(f=>!names.has(f.jidlo));
-    if(newF.length) sv("saved_foods",[...local,...newF]);
-  }
-  sv("last_sync_time", Date.now());
-  render();
 }
 
-
-
-
-
-
-
-
-
-
+// Alias pro zpetnou kompatibilitu
+function testSync(username){ doSync(); }
+function syncWithServer(push={}, retry=false){ doSync(); }
+function scheduleSync(){ clearTimeout(syncTimeout); syncTimeout = setTimeout(doSync, 2000); }
 
 // ── EAN Scanner ───────────────────────────────────────────────────────────────
 let _scanStream=null;
