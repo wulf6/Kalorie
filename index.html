@@ -999,6 +999,7 @@ function render(){
           ${syncOk?`<div style="display:flex;gap:8px;margin-top:8px">
             <button onclick="doSync()" style="flex:1;padding:9px;background:transparent;border:1px solid #0ea5e9;border-radius:10px;color:#0ea5e9;font-weight:600;font-size:13px;cursor:pointer">🔄 Sync</button>
             <button onclick="forceUpload()" style="flex:1;padding:9px;background:transparent;border:1px solid #f97316;border-radius:10px;color:#f97316;font-weight:600;font-size:13px;cursor:pointer">⬆️ Upload</button>
+            <button onclick="debugProfile()" style="flex:1;padding:9px;background:transparent;border:1px solid #8b5cf6;border-radius:10px;color:#8b5cf6;font-weight:600;font-size:13px;cursor:pointer">🔍 Debug</button>
           </div>`:""}
         </div>
 
@@ -1783,6 +1784,30 @@ function setSyncStatus(msg){
   localStorage.setItem("last_sync_status", msg);
 }
 function testSync(username){ doSync(); }
+
+async function debugProfile(){
+  const username = (localStorage.getItem("_sync_username")||"").trim();
+  if(!username){ setToast("Nastav username"); return; }
+  try {
+    const r = await fetch(BACKEND_URL + "/data/user_" + username.toLowerCase());
+    const data = await r.json();
+    const sp = data.profile || {};
+    const lp = profile;
+    const msg = [
+      "=== SERVER PROFIL ===",
+      "váha: " + sp.vaha,
+      "geminiKey: " + (sp.geminiKey ? sp.geminiKey.slice(0,8)+"..." : "prázdný"),
+      "profileTs: " + (sp._profileTs || 0),
+      "=== LOKÁLNÍ PROFIL ===",
+      "váha: " + lp.vaha,
+      "geminiKey: " + (lp.geminiKey ? lp.geminiKey.slice(0,8)+"..." : "prázdný"),
+      "profileTs: " + (lp._profileTs || 0),
+    ].join("\n");
+    alert(msg);
+  } catch(e) {
+    alert("Chyba: " + e.message);
+  }
+}
 function syncWithServer(push={}, retry=false){ doSync(); }
 function scheduleSync(){ clearTimeout(syncTimeout); syncTimeout = setTimeout(doSync, 2000); }
 
