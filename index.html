@@ -1324,7 +1324,7 @@ function handlePhotoDrop(ev){ const file=ev.dataTransfer.files[0]; if(!file||!fi
 function loadPhoto(file){ _photoMime=file.type||"image/jpeg"; const reader=new FileReader(); reader.onload=e=>{_photoBase64=e.target.result.split(",")[1];document.getElementById("ai-photo-img").src=e.target.result;document.getElementById("ai-photo-preview").style.display="block";document.getElementById("ai-photo-placeholder").style.display="none";document.getElementById("ai-photo-area").style.borderColor="#6366f1";}; reader.readAsDataURL(file); }
 function clearPhoto(){ _photoBase64=null; document.getElementById("ai-photo-preview").style.display="none"; document.getElementById("ai-photo-placeholder").style.display="block"; document.getElementById("ai-photo-area").style.borderColor=""; document.getElementById("ai-photo-inp").value=""; }
 
-const GEMINI_MODELS=["gemini-2.5-flash-preview-04-17","gemini-2.5-flash","gemini-1.5-flash","gemini-1.5-flash-8b"];
+const GEMINI_MODELS=["gemini-2.5-flash","gemini-1.5-flash","gemini-1.5-flash-8b"];
 async function callGemini(key,prompt,imageBase64=null,imageMime="image/jpeg"){
   const parts=[]; if(imageBase64)parts.push({inline_data:{mime_type:imageMime,data:imageBase64}}); parts.push({text:prompt});
   const body={contents:[{parts}]}; let lastError=null;
@@ -1395,6 +1395,33 @@ async function handleScanFile(inp){
   reader.readAsDataURL(file);
 }
 
+// ── Open Food Facts vyhledávání ──────────────────────────────────────────────
+async function searchOpenFoodFacts(query){
+  try {
+    const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&lc=cs&cc=cz&page_size=5`;
+    const r = await fetch(url);
+    if(!r.ok) return [];
+    const data = await r.json();
+    return (data.products||[])
+      .filter(p => p.nutriments && p.product_name)
+      .map(p => {
+        const n = p.nutriments;
+        const name = p.product_name_cs || p.product_name || query;
+        const kcal = Math.round(n["energy-kcal_100g"] || (n["energy_100g"]||0)/4.184 || 0);
+        const b = parseFloat((n.proteins_100g||0).toFixed(1));
+        const s = parseFloat((n.carbohydrates_100g||0).toFixed(1));
+        const t = parseFloat((n.fat_100g||0).toFixed(1));
+        const vl = parseFloat((n.fiber_100g||0).toFixed(1));
+        if(!kcal && !b && !s && !t) return null;
+        return [name, kcal, b, s, t, vl, "off"]; // "off" = Open Food Facts
+      })
+      .filter(Boolean);
+  } catch(e) {
+    console.warn("OFF chyba:", e.message);
+    return [];
+  }
+}
+
 function dbKey(s){ if(!s)return""; return s.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]/g,""); }
 function searchDB(q,limit=10){ if(!q||q.length<1)return[]; const needle=dbKey(q);if(!needle)return[]; const starts=[],contains=[]; for(const[key,val]of Object.entries(FOOD_DB)){if(key.startsWith(needle))starts.push(val);else if(key.includes(needle))contains.push(val);if(starts.length+contains.length>=limit*2)break;} return[...starts,...contains].slice(0,limit); }
 
@@ -1408,7 +1435,11 @@ function showGlobalSuggest(inputEl,items,onSelect){
   const height=Math.min(260,Math.max(80,spaceBelow>100?spaceBelow:rect.top-8));
   const top=spaceBelow>100?rect.bottom+4:rect.top-height-4;
   sug.style.top=top+"px";sug.style.left=Math.max(8,rect.left)+"px";sug.style.width=rect.width+"px";sug.style.maxHeight=height+"px";sug.style.display="block";
-  sug.innerHTML=items.map((e,i)=>`<div data-idx="${i}" style="padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:14px" onmouseenter="this.style.background='var(--surface)'" onmouseleave="this.style.background=''"><span style="font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e[0]}</span><span style="color:var(--muted);font-size:12px;flex-shrink:0">${Math.round(e[1])} kcal/100g</span></div>`).join("");
+  sug.innerHTML=items.map((e,i)=>{
+    const isOFF = e[6]==="off";
+    const badge = isOFF ? `<span style="font-size:10px;background:#e0f2fe;color:#0369a1;padding:1px 5px;border-radius:4px;margin-left:4px;flex-shrink:0">OFF</span>` : '';
+    return `<div data-idx="${i}" style="padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:14px" onmouseenter="this.style.background='var(--surface)'" onmouseleave="this.style.background=''"><span style="font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e[0]}${badge}</span><span style="color:var(--muted);font-size:12px;flex-shrink:0">${Math.round(e[1])} kcal/100g</span></div>`;
+  }).join("");
   sug.querySelectorAll("[data-idx]").forEach(el=>{
     const pick=(ev)=>{ev.preventDefault();ev.stopPropagation();const cb=_sugCallback;hideGlobalSuggest();if(cb)cb(items[+el.dataset.idx]);};
     el.addEventListener("mousedown",pick);el.addEventListener("touchend",pick,{passive:false});
@@ -1419,7 +1450,27 @@ document.addEventListener("mousedown",e=>{const sug=document.getElementById("g-s
 document.addEventListener("touchstart",e=>{const sug=document.getElementById("g-suggest");if(sug&&sug.style.display!=="none"&&!sug.contains(e.target))hideGlobalSuggest();},{passive:true});
 
 let _currentManualEntry=null;
-function onManualInput(){ const inp=document.getElementById("m-name");if(!inp)return; _currentManualEntry=null; document.getElementById("m-autofill-info").style.display="none"; const q=inp.value.trim();if(q.length<1){hideGlobalSuggest();return;} const matches=searchDB(q,10);if(!matches.length){hideGlobalSuggest();return;} showGlobalSuggest(inp,matches,selectManualSug); }
+let _manualSearchTimeout=null;
+function onManualInput(){ 
+  const inp=document.getElementById("m-name");if(!inp)return; 
+  _currentManualEntry=null; 
+  document.getElementById("m-autofill-info").style.display="none"; 
+  const q=inp.value.trim();
+  if(q.length<2){hideGlobalSuggest();return;} 
+  
+  // Okamžitě zobraz lokální výsledky
+  const localMatches=searchDB(q,6);
+  if(localMatches.length) showGlobalSuggest(inp,localMatches,selectManualSug);
+  
+  // Po 600ms přidej výsledky z Open Food Facts
+  clearTimeout(_manualSearchTimeout);
+  _manualSearchTimeout=setTimeout(async()=>{
+    const offMatches = await searchOpenFoodFacts(q);
+    const localNow = searchDB(q,5);
+    const combined = [...localNow, ...offMatches.slice(0,5)];
+    if(combined.length) showGlobalSuggest(inp,combined,selectManualSug);
+  }, 600);
+}
 function selectManualSug(entry){ _currentManualEntry=entry; const inp=document.getElementById("m-name");if(inp)inp.value=entry[0]; hideGlobalSuggest(); const tg=getTypicalGrams(entry[0]); const gInp=document.getElementById("m-g");if(gInp)gInp.value=tg; fillManualFromEntry(entry,tg); }
 function fillManualFromEntry(entry,g){ const r=(parseFloat(g)||100)/100; const liquid=isLiquid(entry[0]); const glabel=document.getElementById("m-g-label"); if(glabel)glabel.textContent=liquid?"MNOŽSTVÍ (ml)":"MNOŽSTVÍ (g)"; const set=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v;}; set("m-kcal",Math.round(entry[1]*r));set("m-b",(entry[2]*r).toFixed(1));set("m-s",(entry[3]*r).toFixed(1));set("m-t",(entry[4]*r).toFixed(1));set("m-vl",((entry[5]||0)*r).toFixed(1)); const info=document.getElementById("m-autofill-info"); if(info){info.textContent="✓ Načteno z databáze";info.style.display="block";} }
 function onManualGrams(){ if(!_currentManualEntry)return; const g=parseFloat(document.getElementById("m-g")?.value)||100; fillManualFromEntry(_currentManualEntry,g); }
@@ -1443,7 +1494,22 @@ function cancelEdit(){ editId=null;recipe=[];render(); }
 function logActivity(){ const sel=document.getElementById("act-select"),minEl=document.getElementById("act-min");if(!sel||!minEl)return; const met=parseFloat(sel.value)||3.5; const name=sel.options[sel.selectedIndex]?.dataset?.name||sel.options[sel.selectedIndex]?.text||"Aktivita"; const min=parseFloat(minEl.value)||30,kcal=Math.round(met*profile.vaha*(min/60)); const log=ls("act_log",[]);log.push({id:Date.now(),d:TODAY(),name,min,met,kcal});sv("act_log",log); setToast("✓ "+name+" (−"+kcal+" kcal)");render(); }
 function deleteActivity(id){ sv("act_log",ls("act_log",[]).filter(a=>String(a.id)!==String(id)));render(); }
 
-function showMacroDetail(label,type){ const modal=document.getElementById("macro-detail-modal");if(!modal)return; document.getElementById("macro-detail-title").textContent=label; const keyMap={protein:"b",carbs:"s",fat:"t",fiber:"vl"},key=keyMap[type]||"b"; const items=entries.filter(e=>!e._del&&e[key]>0).sort((a,b)=>b[key]-a[key]); const total=entries.filter(e=>!e._del).reduce((s,e)=>s+(e[key]||0),0); document.getElementById("macro-detail-list").innerHTML=items.map(e=>`<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span>${e.jidlo} <span style="color:var(--muted)">${e.porce_g}g</span></span><span style="font-weight:700">${(e[key]||0).toFixed(1)}g</span></div>`).join(""); document.getElementById("macro-detail-total").textContent="Celkem: "+total.toFixed(1)+"g"; modal.style.display="flex"; }
+function showMacroDetail(label,type){ 
+  const modal=document.getElementById("macro-detail-modal");if(!modal)return; 
+  document.getElementById("macro-detail-title").textContent=label; 
+  const keyMap={protein:"b",carbs:"s",fat:"t",fiber:"vl"},key=keyMap[type]||"b"; 
+  const items=entries.filter(e=>!e._del&&e[key]>0).sort((a,b)=>b[key]-a[key]); 
+  const total=entries.filter(e=>!e._del).reduce((s,e)=>s+(e[key]||0),0); 
+  document.getElementById("macro-detail-list").innerHTML=items.map(e=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
+      <span style="flex:1">${e.jidlo} <span style="color:var(--muted)">${e.porce_g}${(e.isWater||isLiquid(e.jidlo))?"ml":"g"}</span></span>
+      <span style="font-weight:700;margin-right:12px">${(e[key]||0).toFixed(1)}g</span>
+      <button onclick="removeEntry(${e.id});closeMacroDetail();showMacroDetail('${label}','${type}')" 
+        style="background:#fef2f2;border:none;color:#ef4444;padding:2px 8px;border-radius:6px;cursor:pointer;font-size:14px;flex-shrink:0">×</button>
+    </div>`).join(""); 
+  document.getElementById("macro-detail-total").textContent="Celkem: "+total.toFixed(1)+"g"; 
+  modal.style.display="flex"; 
+}
 function closeMacroDetail(){ const m=document.getElementById("macro-detail-modal");if(m)m.style.display="none"; }
 function logWeight(){ const inp=document.getElementById("w-inp");if(!inp)return; const w=parseFloat(inp.value);if(isNaN(w)||w<20||w>300){setToast("Neplatná hodnota");return;} const log=ls("weight_log",[]);log.push({d:TODAY(),w});sv("weight_log",log); setToast("✓ "+w+" kg uloženo");render(); }
 function deleteWeight(date){ sv("weight_log",ls("weight_log",[]).filter(e=>e.d!==date));render(); }
@@ -1635,12 +1701,19 @@ async function doSync(){
     if(!postR.ok) throw new Error("POST " + postR.status);
     const result = await postR.json();
 
-    // Krok 4: Přijmi případná další nová jídla z výsledku
+    // Krok 4: Server vrátil finálně mergovaná data - použij je jako zdroj pravdy
     const resultToday = (result.entries || {})[today] || [];
-    const mergedIds = new Set(merged.map(e => String(e.id)));
-    const extraNew = resultToday.filter(e => !mergedIds.has(String(e.id)));
-    if(extraNew.length){
-      entries = [...entries, ...extraNew];
+    if(resultToday.length > 0){
+      // Merge výsledku se serveru s lokálním - vyhraje vždy novější _t
+      const finalMap = new Map(resultToday.map(e => [String(e.id), e]));
+      for(const le of entries){
+        const key = String(le.id);
+        const srv = finalMap.get(key);
+        if(!srv || (le._t||0) > (srv._t||0)){
+          finalMap.set(key, le);
+        }
+      }
+      entries = Array.from(finalMap.values());
       sv("ent_" + today, entries);
     }
 
