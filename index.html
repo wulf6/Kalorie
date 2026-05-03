@@ -996,12 +996,14 @@ function render(){
             :`<div style="font-size:11px;color:var(--muted);margin-top:6px">Data se ukládají jen lokálně dokud nezadáš jméno a URL.</div>`}
 
           <div id="sync-status-line" style="font-size:11px;color:var(--muted);margin-top:8px;padding:5px 10px;background:var(--surface);border-radius:8px;text-align:center">${localStorage.getItem("last_sync_status")||"Čekám na sync…"}</div>
-          ${syncOk?`<div style="display:flex;gap:8px;margin-top:8px">
-            <button onclick="doSync()" style="flex:1;padding:9px;background:transparent;border:1px solid #0ea5e9;border-radius:10px;color:#0ea5e9;font-weight:600;font-size:13px;cursor:pointer">🔄 Sync</button>
-            <button onclick="forceUpload()" style="flex:1;padding:9px;background:transparent;border:1px solid #f97316;border-radius:10px;color:#f97316;font-weight:600;font-size:13px;cursor:pointer">⬆️ Upload</button>
-            <button onclick="debugProfile()" style="flex:1;padding:9px;background:transparent;border:1px solid #8b5cf6;border-radius:10px;color:#8b5cf6;font-weight:600;font-size:13px;cursor:pointer">🔍 Debug</button>
-          </div>
-          <button onclick="pushProfile()" style="width:100%;padding:9px;margin-top:6px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border:none;border-radius:10px;color:#fff;font-weight:600;font-size:13px;cursor:pointer">⬆️ Nahrát MŮJ profil na server</button>`:""}
+          ${syncOk?`<div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+            <div style="display:flex;gap:8px">
+              <button onclick="doSync()" style="flex:1;padding:9px;background:transparent;border:1px solid #0ea5e9;border-radius:10px;color:#0ea5e9;font-weight:600;font-size:13px;cursor:pointer">🔄 Sync</button>
+              <button onclick="forceUpload()" style="flex:1;padding:9px;background:transparent;border:1px solid #f97316;border-radius:10px;color:#f97316;font-weight:600;font-size:13px;cursor:pointer">⬆️ Upload</button>
+              <button onclick="debugProfile()" style="flex:1;padding:9px;background:transparent;border:1px solid #8b5cf6;border-radius:10px;color:#8b5cf6;font-weight:600;font-size:13px;cursor:pointer">🔍 Debug</button>
+            </div>
+            <button onclick="pushProfile()" style="width:100%;padding:9px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border:none;border-radius:10px;color:#fff;font-weight:600;font-size:13px;cursor:pointer">⬆️ Nahrát MŮJ profil na server</button>
+          </div>`:""}
         </div>
 
         <!-- Proxy URL -->
