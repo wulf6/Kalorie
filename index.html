@@ -1545,7 +1545,8 @@ async function syncWithServer(push={}, _retry=false){
       entries: {[today]: entries},
       history: hist,
       receptar: ls("saved_foods",[]),
-      aktivity: ls("act_log",[])
+      aktivity: ls("act_log",[]),
+      weight_log: ls("weight_log",[])
     };
 
     const controller = new AbortController();
@@ -1562,26 +1563,25 @@ async function syncWithServer(push={}, _retry=false){
     if(!resp.ok) throw new Error("HTTP "+resp.status);
     const data = await resp.json();
 
-    // Aplikuj profil ze serveru (lokální sync nastavení mají vždy přednost)
+    // Aplikuj profil ze serveru - server má přednost pro všechna data
     if(data.profile && Object.keys(data.profile).length > 0){
-      // Načti sync nastavení z odděleného úložiště (nikdy se nepřepíše)
       const localUsername = localStorage.getItem("_sync_username") || profile.syncUsername || "";
-      const merged = {
+      // Gemini klíč - vyhraje novější timestamp
+      const localTs = profile.geminiKeyTs || 0;
+      const serverTs = data.profile.geminiKeyTs || 0;
+      const winningKey = serverTs >= localTs
+        ? (data.profile.geminiKey || profile.geminiKey || "")
+        : (profile.geminiKey || data.profile.geminiKey || "");
+      const winningKeyTs = Math.max(localTs, serverTs);
+
+      // Vezmi vše ze serveru, zachovej jen lokální sync nastavení a gemini klíč
+      profile = {
         ...data.profile,
-        geminiKey: (()=>{
-        const localTs = profile.geminiKeyTs || 0;
-        const serverTs = data.profile.geminiKeyTs || 0;
-        if(serverTs >= localTs) return data.profile.geminiKey || profile.geminiKey || "";
-        return profile.geminiKey || data.profile.geminiKey || "";
-      })(),
-      geminiKeyTs: Math.max(profile.geminiKeyTs||0, data.profile.geminiKeyTs||0),
+        geminiKey: winningKey,
+        geminiKeyTs: winningKeyTs,
         backendUrl: BACKEND_URL,
         syncUsername: localUsername,
-        proxyUrl: profile.proxyUrl || data.profile.proxyUrl || "",
-        fontSize: profile.fontSize || data.profile.fontSize || "1.0",
-        notifEnabled: profile.notifEnabled
       };
-      profile = merged;
       sv("prof2", profile);
     }
 
@@ -1718,6 +1718,14 @@ async function doSync(){
     }
 
     if(result.history){ hist = {...hist, ...result.history}; sv("hist2", hist); }
+    // Aplikuj váhu
+    if(result.weight_log && result.weight_log.length){
+      const localW = ls("weight_log",[]);
+      const localDates = new Set(localW.map(e=>e.d));
+      const newW = result.weight_log.filter(e=>!localDates.has(e.d));
+      if(newW.length) sv("weight_log",[...localW,...newW].sort((a,b)=>a.d.localeCompare(b.d)));
+    }
+
     // Aplikuj aktivity
     if(result.aktivity && result.aktivity.length){
       const localActs = ls("act_log",[]);
