@@ -1213,12 +1213,12 @@ function setTab(t){ tab=t; render(); }
 function setProfTab(t){ profTab=t; render(); }
 function toggleDark(){ dark=!dark; document.body.classList.toggle("dark",dark); sv("dark2",dark); render(); }
 function addEntry(data){ entries=[...entries,{...data,id:Date.now(),slot:activeSlot}]; sv("ent_"+TODAY(),entries); render(); syncWithServer({}); }
-function updProf(k,v){ profile={...profile,[k]:v}; sv("prof2",profile); render(); }
+function updProf(k,v){ profile={...profile,[k]:v,_profileTs:Date.now()}; sv("prof2",profile); render(); }
 
 function saveApiKey(){
   const inp = document.getElementById("gemini-key-inp"); if(!inp) return;
   const key = inp.value.trim(); if(!key){ setToast("Zadej API klíč"); return; }
-  profile = {...profile, geminiKey: key, geminiKeyTs: Date.now()}; sv("prof2", profile);
+  profile = {...profile, geminiKey: key, geminiKeyTs: Date.now(), _profileTs: Date.now()}; sv("prof2", profile);
   setToast("✓ Gemini klíč uložen!"); render();
 }
 async function testApiKey(){
@@ -1541,7 +1541,7 @@ async function syncWithServer(push={}, _retry=false){
     const body = {
       device_id: DEVICE_ID,
       username: username,
-      profile: profile,
+      profile: {...profile, _profileTs: profile._profileTs || 0},
       entries: {[today]: entries},
       history: hist,
       receptar: ls("saved_foods",[]),
