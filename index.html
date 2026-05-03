@@ -1000,7 +1000,8 @@ function render(){
             <button onclick="doSync()" style="flex:1;padding:9px;background:transparent;border:1px solid #0ea5e9;border-radius:10px;color:#0ea5e9;font-weight:600;font-size:13px;cursor:pointer">🔄 Sync</button>
             <button onclick="forceUpload()" style="flex:1;padding:9px;background:transparent;border:1px solid #f97316;border-radius:10px;color:#f97316;font-weight:600;font-size:13px;cursor:pointer">⬆️ Upload</button>
             <button onclick="debugProfile()" style="flex:1;padding:9px;background:transparent;border:1px solid #8b5cf6;border-radius:10px;color:#8b5cf6;font-weight:600;font-size:13px;cursor:pointer">🔍 Debug</button>
-          </div>`:""}
+          </div>
+          <button onclick="pushProfile()" style="width:100%;padding:9px;margin-top:6px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border:none;border-radius:10px;color:#fff;font-weight:600;font-size:13px;cursor:pointer">⬆️ Nahrát MŮJ profil na server</button>`:""}
         </div>
 
         <!-- Proxy URL -->
@@ -1785,6 +1786,34 @@ function setSyncStatus(msg){
 }
 function testSync(username){ doSync(); }
 
+async function pushProfile(){
+  const username = (localStorage.getItem("_sync_username")||"").trim();
+  if(!username){ setToast("Nastav username"); return; }
+  // Nastav vysoký timestamp aby vyhrál nad vším
+  profile._profileTs = Date.now();
+  sv("prof2", profile);
+  try {
+    const r = await fetch(BACKEND_URL + "/sync", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        device_id: DEVICE_ID,
+        username: username,
+        profile: profile,
+        entries: {[TODAY()]: entries},
+        history: hist,
+        receptar: ls("saved_foods",[]),
+        aktivity: ls("act_log",[]),
+        weight_log: ls("weight_log",[])
+      })
+    });
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    setToast("✅ Profil nahrán na server – Android se aktualizuje při dalším syncu");
+  } catch(e) {
+    setToast("❌ "+e.message);
+  }
+}
+
 async function debugProfile(){
   const username = (localStorage.getItem("_sync_username")||"").trim();
   if(!username){ setToast("Nastav username"); return; }
@@ -1889,6 +1918,8 @@ async function lookupBarcode(code){
 // Obnov sync username z odděleného úložiště
 const _savedUsername = localStorage.getItem("_sync_username");
 if(_savedUsername) profile.syncUsername = _savedUsername;
+// Pokud profil nemá timestamp, nastav ho teď
+if(!profile._profileTs){ profile._profileTs = Date.now(); sv("prof2", profile); }
 if(profile.fontSize) applyFontSize(profile.fontSize);
 setTimeout(()=>{const s=document.getElementById("splash");if(s&&s.style.display!=="none"){s.style.opacity=0;setTimeout(()=>s.style.display="none",400);render();}},5000);
 loadFoodDB().then(()=>{ render(); return syncWithServer({}); }).catch(err=>{console.error(err);render();});
