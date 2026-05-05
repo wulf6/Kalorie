@@ -1612,7 +1612,7 @@ function showMacroDetail(label,type){
   modal.style.display="flex"; 
 }
 function closeMacroDetail(){ const m=document.getElementById("macro-detail-modal");if(m)m.style.display="none"; }
-function logWeight(){ const inp=document.getElementById("w-inp");if(!inp)return; const w=parseFloat(inp.value);if(isNaN(w)||w<20||w>300){setToast("Neplatná hodnota");return;} const log=ls("weight_log",[]);log.push({d:TODAY(),w,_t:Date.now()});sv("weight_log",log); setToast("✓ "+w+" kg uloženo");render(); }
+function logWeight(){ const inp=document.getElementById("w-inp");if(!inp)return; const w=parseFloat(inp.value);if(isNaN(w)||w<20||w>300){setToast("Neplatná hodnota");return;} const log=ls("weight_log",[]);log.push({d:TODAY(),w,_t:Date.now()});sv("weight_log",log); profile={...profile,vaha:w,_profileTs:Date.now()}; sv("prof2",profile); setToast("✓ "+w+" kg uloženo"); markDirty(); scheduleSync(); render(); }
 function deleteWeight(date){ sv("weight_log",ls("weight_log",[]).filter(e=>e.d!==date));render(); }
 function repeatEntry(id){ const orig=entries.find(e=>e.id===id);if(!orig)return; const{id:_,...copy}=orig;entries.push({...copy,id:Date.now()}); sv("ent_"+TODAY(),entries);render();setToast("✓ "+orig.jidlo+" přidáno"); }
 function repeatYesterday(idx){ const items=window._ydItems||[];const e=items[idx];if(!e)return; addEntry({...e,id:undefined});setToast("✓ "+e.jidlo+" přidáno znovu"); }
@@ -1949,36 +1949,59 @@ async function pushProfile(){
 async function forceDownload(){
   const username = (localStorage.getItem("_sync_username")||"").trim();
   if(!username){ setToast("Nastav username"); return; }
+  setToast("⏳ Stahuji ze serveru…");
   try {
-    const r = await fetch(BACKEND_URL + "/data/user_" + username.toLowerCase());
+    const r = await fetch(BACKEND_URL + "/data/user_" + username.toLowerCase() + "?v=" + Date.now());
     if(!r.ok) throw new Error("HTTP "+r.status);
     const serverData = await r.json();
-    if(serverData.profile && Object.keys(serverData.profile).length > 0){
-      const localUsername = localStorage.getItem("_sync_username") || username;
-      const oldKey = profile.geminiKey;
-      profile = {
-        ...serverData.profile,
-        geminiKey: oldKey || serverData.profile.geminiKey || "",
-        backendUrl: BACKEND_URL,
-        syncUsername: localUsername,
-      };
-      sv("prof2", profile);
-      if(profile.fontSize) applyFontSize(profile.fontSize);
+
+    if(!serverData.profile || Object.keys(serverData.profile).length === 0){
+      setToast("⚠️ Server nemá žádný profil pro: " + username);
+      return;
     }
-    if(serverData.weight_log) sv("weight_log", serverData.weight_log);
-    if(serverData.aktivity){
-      sv("act_log", serverData.aktivity);
-    }
+
+    const localUsername = localStorage.getItem("_sync_username") || username;
+    // Zachovej lokální Gemini klíč pokud server nemá žádný
+    const winningKey = serverData.profile.geminiKey || profile.geminiKey || "";
+
+    // Úplně přepiš lokální profil serverovým
+    profile = {
+      ...serverData.profile,
+      geminiKey: winningKey,
+      geminiKeyTs: serverData.profile.geminiKeyTs || profile.geminiKeyTs || 0,
+      backendUrl: BACKEND_URL,
+      syncUsername: localUsername,
+      // Nastav timestamp o 1ms do budoucnosti aby vyhrál při dalším syncu
+      _profileTs: (serverData.profile._profileTs || Date.now()) + 1,
+    };
+    sv("prof2", profile);
+    if(profile.fontSize) applyFontSize(profile.fontSize);
+
+    // Přepiš weight_log a aktivity
+    if(serverData.weight_log && serverData.weight_log.length) sv("weight_log", serverData.weight_log);
+    if(serverData.aktivity && serverData.aktivity.length) sv("act_log", serverData.aktivity);
+    if(serverData.history) { hist = serverData.history; sv("hist2", hist); }
+
+    // Vynutit kompletní reload UI
     render();
-    requestAnimationFrame(()=>{
+    // Prohlížeč si pamatuje staré hodnoty v inputech - přepiš je explicitně
+    setTimeout(()=>{
       ["vyska","vaha","cilVaha","vek"].forEach(key=>{
         const el = document.getElementById("prof-inp-"+key);
-        if(el) el.value = profile[key] || "";
+        if(el){ el.value = ""; el.value = profile[key] || ""; }
       });
-    });
-    setToast("✅ Profil stažen ze serveru · váha: "+profile.vaha+"kg");
+      const ki = document.getElementById("gemini-key-inp");
+      if(ki){ ki.value = ""; ki.value = profile.geminiKey || ""; }
+      const su = document.getElementById("sync-username");
+      if(su){ su.value = ""; su.value = profile.syncUsername || ""; }
+      const vi = document.querySelector("input[onblur*='vodaCil']");
+      if(vi){ vi.value = ""; vi.value = profile.vodaCil || Math.round((profile.vaha||80)*35); }
+    }, 100);
+
+    setToast("✅ Staženo · váha: " + profile.vaha + "kg · API: " + (profile.geminiKey ? "✓" : "✗"));
+    setSyncStatus("📥 Staženo ze serveru · " + new Date().toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}));
   } catch(e) {
-    setToast("❌ "+e.message);
+    setToast("❌ forceDownload: " + e.message);
   }
 }
 
@@ -1986,17 +2009,22 @@ async function debugProfile(){
   const username = (localStorage.getItem("_sync_username")||"").trim();
   if(!username){ setToast("Nastav username"); return; }
   try {
-    const r = await fetch(BACKEND_URL + "/data/user_" + username.toLowerCase());
+    const r = await fetch(BACKEND_URL + "/data/user_" + username.toLowerCase() + "?v=" + Date.now());
     const data = await r.json();
     const sp = data.profile || {};
     const lp = profile;
+    const sw = (data.weight_log||[]).slice(-3).map(e=>e.d+":"+e.w+"kg").join(", ")||"prázdný";
+    const lw = ls("weight_log",[]).slice(-3).map(e=>e.d+":"+e.w+"kg").join(", ")||"prázdný";
     const msg = [
       "=== SERVER PROFIL ===",
       "váha: " + sp.vaha,
+      "výška: " + sp.vyska,
       "geminiKey: " + (sp.geminiKey ? sp.geminiKey.slice(0,8)+"..." : "prázdný"),
-      "profileTs: " + (sp._profileTs || 0),
+      "profileTs: " + new Date(sp._profileTs||0).toLocaleString("cs-CZ"),
+      "weight_log (poslední 3): " + sw,
       "=== LOKÁLNÍ PROFIL ===",
       "váha: " + lp.vaha,
+      "výška: " + lp.vyska,
       "geminiKey: " + (lp.geminiKey ? lp.geminiKey.slice(0,8)+"..." : "prázdný"),
       "profileTs: " + (lp._profileTs || 0),
     ].join("\n");
