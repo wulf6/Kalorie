@@ -1398,7 +1398,7 @@ async function forceUpload(){
       body: JSON.stringify({
         device_id: DEVICE_ID,
         username: username,
-        profile: Object.assign({}, profile, {_profileTs: Date.now()}),
+        profile: Object.assign({}, profile, {_profileTs: profile._profileTs || Date.now()}),
         entries: {[TODAY()]: entries},
         history: hist,
         receptar: ls("saved_foods",[]),
@@ -1787,16 +1787,20 @@ async function doSync(){
     if(!getR.ok) throw new Error("GET " + getR.status);
     const serverData = await getR.json();
 
-    // KROK 2: Profil - vyhraje novější _profileTs
+    // KROK 2: Profil merge - novější _profileTs vyhraje, na novém zařízení vždy přijmi ze serveru
     if(serverData.profile && Object.keys(serverData.profile).length > 0){
       const serverTs = serverData.profile._profileTs || 0;
       const localTs = profile._profileTs || 0;
-      if(serverTs > localTs){
+      // Výchozí profil = vaha:80, vyska:178 → považujeme za "prázdný" pokud localTs==0
+      const isDefaultProfile = localTs === 0;
+      const serverIsNewer = serverTs >= localTs; // >= aby nový Android vždy dostal server profil
+      if(serverIsNewer || isDefaultProfile){
         const localUsername = localStorage.getItem("_sync_username") || profile.syncUsername || "";
         const serverKeyTs = serverData.profile.geminiKeyTs || 0;
         const localKeyTs = profile.geminiKeyTs || 0;
+        // Gemini klíč: vyhraje ten s novějším timestampem, zachovej lokální pokud server nemá žádný
         const winningKey = localKeyTs > serverKeyTs
-          ? profile.geminiKey
+          ? (profile.geminiKey || serverData.profile.geminiKey || "")
           : (serverData.profile.geminiKey || profile.geminiKey || "");
         const winningKeyTs = Math.max(localKeyTs, serverKeyTs);
         profile = {
@@ -2084,7 +2088,7 @@ async function lookupBarcode(code){
 const _savedUsername = localStorage.getItem("_sync_username");
 if(_savedUsername) profile.syncUsername = _savedUsername;
 // Pokud profil nemá timestamp, nastav ho teď
-if(!profile._profileTs){ profile._profileTs = Date.now(); sv("prof2", profile); }
+if(!profile._profileTs){ profile._profileTs = 1; sv("prof2", profile); } // timestamp=1 = výchozí profil, server vyhraje
 if(profile.fontSize) applyFontSize(profile.fontSize);
 setTimeout(()=>{const s=document.getElementById("splash");if(s&&s.style.display!=="none"){s.style.opacity=0;setTimeout(()=>s.style.display="none",400);render();}},5000);
 loadFoodDB().then(()=>{ render(); return syncWithServer({}); }).catch(err=>{console.error(err);render();});
