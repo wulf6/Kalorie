@@ -155,16 +155,19 @@ def sync(body: SyncBody):
                 if (act.get("_t") or 0) > (user["aktivity"][act_id].get("_t") or 0):
                     user["aktivity"][act_id] = act
 
-    # ── Weight log ──
+    # ── Weight log - merge s soft-delete podporou ──
     if body.weight_log is not None:
         for entry in body.weight_log:
             date = entry.get("d", "")
             if not date:
                 continue
             if date not in user["weight_log"]:
-                user["weight_log"][date] = entry
+                user["weight_log"][date] = entry  # nový záznam
             else:
-                if (entry.get("_t") or 0) >= (user["weight_log"][date].get("_t") or 0):
+                server_t = user["weight_log"][date].get("_t") or 0
+                incoming_t = entry.get("_t") or 0
+                if incoming_t >= server_t:
+                    # Příchozí je novější nebo stejný - přijmi (včetně _del flagu)
                     user["weight_log"][date] = entry
 
     # Ulož backup
@@ -194,5 +197,5 @@ def _user_response(user: dict, uid: str) -> dict:
         "history": user.get("history", {}),
         "receptar": list(user.get("receptar", {}).values()),
         "aktivity": list(user.get("aktivity", {}).values()),
-        "weight_log": sorted(user.get("weight_log", {}).values(), key=lambda x: x.get("d", "")),
+        "weight_log": sorted(user.get("weight_log", {}).values(), key=lambda x: x.get("d", "")),  # včetně _del
     }
