@@ -1613,7 +1613,7 @@ function showMacroDetail(label,type){
 }
 function closeMacroDetail(){ const m=document.getElementById("macro-detail-modal");if(m)m.style.display="none"; }
 function logWeight(){ const inp=document.getElementById("w-inp");if(!inp)return; const w=parseFloat(inp.value);if(isNaN(w)||w<20||w>300){setToast("Neplatná hodnota");return;} const log=ls("weight_log",[]);log.push({d:TODAY(),w,_t:Date.now()});sv("weight_log",log); profile={...profile,vaha:w,_profileTs:Date.now()}; sv("prof2",profile); setToast("✓ "+w+" kg uloženo"); markDirty(); scheduleSync(); render(); }
-function deleteWeight(date){ sv("weight_log",ls("weight_log",[]).filter(e=>e.d!==date));render(); }
+function deleteWeight(date){ sv("weight_log",ls("weight_log",[]).filter(e=>e.d!==date)); markDirty(); scheduleSync(); render(); }
 function repeatEntry(id){ const orig=entries.find(e=>e.id===id);if(!orig)return; const{id:_,...copy}=orig;entries.push({...copy,id:Date.now()}); sv("ent_"+TODAY(),entries);render();setToast("✓ "+orig.jidlo+" přidáno"); }
 function repeatYesterday(idx){ const items=window._ydItems||[];const e=items[idx];if(!e)return; addEntry({...e,id:undefined});setToast("✓ "+e.jidlo+" přidáno znovu"); }
 function requestNotifications(){ if(!("Notification"in window)){setToast("Notifikace nejsou podporovány");return;} Notification.requestPermission().then(p=>{if(p==="granted"){updProf("notifEnabled",true);scheduleNotification();setToast("✓ Notifikace zapnuty");}else setToast("Notifikace zamítnuty");}); }
@@ -1825,16 +1825,18 @@ async function doSync(){
     entries = mergedEntries;
     sv("ent_" + today, entries);
 
-    // KROK 4: Váha - merge podle data a _t
-    if(serverData.weight_log && serverData.weight_log.length){
+    // KROK 4: Váha - merge podle data a _t (sjednoť záznamy z obou zařízení)
+    {
       const localW = ls("weight_log", []);
+      const serverW = serverData.weight_log || [];
       const mergedW = [...localW];
-      for(const sw of serverData.weight_log){
+      for(const sw of serverW){
         const idx = mergedW.findIndex(lw => lw.d === sw.d);
-        if(idx === -1) mergedW.push(sw);
-        else if((sw._t||0) > (mergedW[idx]._t||0)) mergedW[idx] = sw;
+        if(idx === -1) mergedW.push({...sw, _t: sw._t||1}); // přidej ze serveru
+        else if((sw._t||0) > (mergedW[idx]._t||0)) mergedW[idx] = sw; // server je novější
       }
-      sv("weight_log", mergedW.sort((a,b)=>a.d.localeCompare(b.d)));
+      const sortedW = mergedW.sort((a,b)=>a.d.localeCompare(b.d));
+      sv("weight_log", sortedW); // ulož merge
     }
 
     // KROK 5: Aktivity - merge podle id a _t
@@ -1875,7 +1877,7 @@ async function doSync(){
         history: hist,
         receptar: ls("saved_foods", []),
         aktivity: ls("act_log", []),
-        weight_log: ls("weight_log", [])
+        weight_log: ls("weight_log", []) // po mergu obsahuje záznamy z obou zařízení
       })
     });
 
