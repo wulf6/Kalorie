@@ -1126,6 +1126,7 @@ function render(){
               <button onclick="updProf('${key}',null)" style="font-size:11px;color:var(--muted);background:transparent;border:none;cursor:pointer;padding:2px 6px;border-radius:6px;border:1px solid var(--border)">Auto: ${auto}g</button>
             </div>
             <input class="inp" type="number" min="0" max="999" step="1"
+              id="prof-inp-${key}"
               value="${mp[key]!=null?mp[key]:auto}"
               onblur="if(this.value!='')updProf('${key}',+this.value)"
               onkeydown="if(event.key==='Enter'){this.blur();}"/>
@@ -1784,22 +1785,21 @@ async function doSync(){
     if(!getR.ok) throw new Error("GET " + getR.status);
     const serverData = await getR.json();
 
-    // KROK 2: Profil merge - novější _profileTs vyhraje, na novém zařízení vždy přijmi ze serveru
+    // KROK 2: Profil merge - novější _profileTs vyhraje
     if(serverData.profile && Object.keys(serverData.profile).length > 0){
       const serverTs = serverData.profile._profileTs || 0;
       const localTs = profile._profileTs || 0;
-      // Výchozí profil = vaha:80, vyska:178 → považujeme za "prázdný" pokud localTs==0
-      const isDefaultProfile = localTs === 0;
-      const serverIsNewer = serverTs >= localTs; // >= aby nový Android vždy dostal server profil
-      if(serverIsNewer || isDefaultProfile){
-        const localUsername = localStorage.getItem("_sync_username") || profile.syncUsername || "";
-        const serverKeyTs = serverData.profile.geminiKeyTs || 0;
-        const localKeyTs = profile.geminiKeyTs || 0;
-        // Gemini klíč: vyhraje ten s novějším timestampem, zachovej lokální pokud server nemá žádný
-        const winningKey = localKeyTs > serverKeyTs
-          ? (profile.geminiKey || serverData.profile.geminiKey || "")
-          : (serverData.profile.geminiKey || profile.geminiKey || "");
-        const winningKeyTs = Math.max(localKeyTs, serverKeyTs);
+      const localUsername = localStorage.getItem("_sync_username") || profile.syncUsername || "";
+      const serverKeyTs = serverData.profile.geminiKeyTs || 0;
+      const localKeyTs = profile.geminiKeyTs || 0;
+      // Gemini klíč: vyhraje ten s novějším timestampem
+      const winningKey = localKeyTs >= serverKeyTs
+        ? (profile.geminiKey || serverData.profile.geminiKey || "")
+        : (serverData.profile.geminiKey || profile.geminiKey || "");
+      const winningKeyTs = Math.max(localKeyTs, serverKeyTs);
+
+      if(serverTs > localTs){
+        // Server je novější → přijmi server profil (jiné zařízení změnilo data)
         profile = {
           ...serverData.profile,
           geminiKey: winningKey,
@@ -1809,6 +1809,21 @@ async function doSync(){
         };
         sv("prof2", profile);
         if(profile.fontSize) applyFontSize(profile.fontSize);
+      } else if(localTs === 1 || localTs === 0){
+        // Nové zařízení bez profilu → přijmi ze serveru
+        profile = {
+          ...serverData.profile,
+          geminiKey: winningKey,
+          geminiKeyTs: winningKeyTs,
+          backendUrl: BACKEND_URL,
+          syncUsername: localUsername,
+        };
+        sv("prof2", profile);
+        if(profile.fontSize) applyFontSize(profile.fontSize);
+      } else {
+        // Lokální profil je stejně starý nebo novější → zachovej, ale aktualizuj Gemini klíč
+        profile = {...profile, geminiKey: winningKey, geminiKeyTs: winningKeyTs};
+        sv("prof2", profile);
       }
     }
 
@@ -1893,14 +1908,23 @@ async function doSync(){
     _lastSyncHash = _stateHash();
     render();
 
-    // Explicitně nastav hodnoty profil inputů po syncu
+    // Explicitně nastav hodnoty profil inputů po syncu (prohlížeč si pamatuje staré hodnoty)
     requestAnimationFrame(()=>{
       ["vyska","vaha","cilVaha","vek"].forEach(key=>{
         const el = document.getElementById("prof-inp-"+key);
-        if(el) el.value = profile[key] || "";
+        if(el){ el.value = ""; el.value = profile[key] || ""; }
       });
       const ki = document.getElementById("gemini-key-inp");
-      if(ki && profile.geminiKey) ki.value = profile.geminiKey;
+      if(ki){ ki.value = ""; ki.value = profile.geminiKey || ""; }
+      const su = document.getElementById("sync-username");
+      if(su){ su.value = ""; su.value = profile.syncUsername || ""; }
+      const vi = document.querySelector("input[onblur*='vodaCil']");
+      if(vi){ vi.value = ""; vi.value = profile.vodaCil || Math.round((profile.vaha||80)*35); }
+      // Makra inputy (mají id prof-inp-macroBilk atd.)
+      ["macroBilk","macroTuky","macroSach","macroVlak"].forEach(key=>{
+        const el = document.getElementById("prof-inp-"+key);
+        if(el && profile[key] != null){ el.value = ""; el.value = profile[key]; }
+      });
     });
 
     setSyncStatus("☁️ " + new Date().toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}) + " · " + entries.filter(e=>!e._del).length + " jídel · váha: " + profile.vaha + "kg");
