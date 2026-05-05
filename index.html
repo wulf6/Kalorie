@@ -116,6 +116,40 @@ body{background:var(--bg);color:var(--text);transition:background .3s,color .3s}
 input:focus,textarea:focus{scroll-margin-bottom:120px}
 .macro-detail-modal{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:400;display:flex;align-items:center;justify-content:center;padding:20px}
 .macro-detail-card{background:var(--card);border-radius:24px;max-width:500px;width:100%;max-height:80vh;overflow-y:auto;padding:20px;border:1px solid var(--border)}
+
+/* TOAST BUBLINA */
+.sync-toast{
+  position:fixed;
+  bottom:100px;
+  left:50%;
+  transform:translateX(-50%) translateY(20px);
+  background:linear-gradient(135deg,#16a34a,#15803d);
+  color:white;
+  padding:12px 24px;
+  border-radius:50px;
+  font-weight:600;
+  font-size:14px;
+  z-index:10000;
+  box-shadow:0 4px 20px rgba(22,163,74,0.4);
+  opacity:0;
+  transition:all 0.3s ease;
+  pointer-events:none;
+  max-width:90vw;
+  white-space:normal;
+  text-align:center;
+}
+.sync-toast.show{
+  opacity:1;
+  transform:translateX(-50%) translateY(0);
+}
+.sync-toast.error{
+  background:linear-gradient(135deg,#dc2626,#b91c1c);
+  box-shadow:0 4px 20px rgba(220,38,38,0.4);
+}
+.sync-toast.warning{
+  background:linear-gradient(135deg,#f59e0b,#d97706);
+  box-shadow:0 4px 20px rgba(245,158,11,0.4);
+}
 </style>
 </head>
 <body>
@@ -127,6 +161,9 @@ input:focus,textarea:focus{scroll-margin-bottom:120px}
   <div style="color:rgba(255,255,255,.5);font-size:11px;margin-top:4px" id="splash-status">připravuji…</div>
 </div>
 <div id="app"></div>
+
+<!-- TOAST BUBLINA -->
+<div id="sync-toast" class="sync-toast"></div>
 
 <!-- MACRO DETAIL -->
 <div id="macro-detail-modal" style="display:none" class="macro-detail-modal" onclick="closeMacroDetail()">
@@ -1331,6 +1368,52 @@ function clearMsg(){ document.getElementById("add-err").style.display="none"; do
 function showErr(msg){ const el=document.getElementById("add-err"); el.textContent="⚠️ "+msg; el.style.display="block"; }
 function showOk(msg){ const el=document.getElementById("add-ok"); if(el){el.textContent="✓ "+msg; el.style.display="block";} }
 function setToast(msg){ let t=document.getElementById("_toast"); if(!t){t=document.createElement("div");t.id="_toast";t.style.cssText="position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#16a34a;color:#fff;padding:10px 22px;border-radius:50px;font-weight:600;font-size:14px;z-index:9999;box-shadow:0 4px 16px rgba(22,163,74,.3);transition:opacity .3s";document.body.appendChild(t);} t.textContent=msg; t.style.opacity=1; clearTimeout(t._t); t._t=setTimeout(()=>{t.style.opacity=0;},2400); }
+
+function showSyncToast(message, type){
+  type = type || "success";
+  var toast = document.getElementById("sync-toast");
+  if(!toast) return;
+  toast.textContent = message;
+  toast.className = "sync-toast " + (type === "error" ? "error" : type === "warning" ? "warning" : "");
+  setTimeout(function(){ toast.classList.add("show"); }, 10);
+  clearTimeout(toast._t);
+  toast._t = setTimeout(function(){ toast.classList.remove("show"); }, 3000);
+}
+
+function setSyncStatus(msg){
+  var el = document.getElementById("sync-status-line");
+  if(el) el.textContent = msg;
+  try{ localStorage.setItem("last_sync_status", msg); }catch(_){}
+}
+
+async function forceUpload(){
+  var username = (localStorage.getItem("_sync_username")||"").trim();
+  if(!username){ setToast("Nastav username"); return; }
+  setSyncStatus("⬆️ Nahrávám data…");
+  setToast("⬆️ Nahrávám na server…");
+  try {
+    var r = await fetch(BACKEND_URL + "/sync", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        device_id: DEVICE_ID,
+        username: username,
+        profile: Object.assign({}, profile, {_profileTs: Date.now()}),
+        entries: {[TODAY()]: entries},
+        history: hist,
+        receptar: ls("saved_foods",[]),
+        aktivity: ls("act_log",[]),
+        weight_log: ls("weight_log",[])
+      })
+    });
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    setSyncStatus("✅ Upload hotov · " + new Date().toLocaleTimeString("cs-CZ",{hour:"2-digit",minute:"2-digit"}));
+    setToast("✅ Data nahrána na server");
+  } catch(e) {
+    setSyncStatus("⚠️ Upload selhal: "+e.message);
+    setToast("❌ Upload selhal: "+e.message);
+  }
+}
 
 let _aiMatches=[];
 function onAiInput(){ const inp=document.getElementById("ai-input"); const q=normKey(inp.value); if(q.length<2){hideGlobalSuggest();return;} const matches=Object.entries(FOOD_DB).filter(([k])=>k.includes(q)).slice(0,8).map(([,e])=>e); showGlobalSuggest(inp,matches,(entry)=>{inp.value=entry[0];hideGlobalSuggest();const gInp=document.getElementById("ai-g");if(gInp)gInp.value=getTypicalGrams(entry[0]);}); }
