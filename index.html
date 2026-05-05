@@ -1264,7 +1264,7 @@ function removeEntry(id){ entries=entries.map(e=>String(e.id)===String(id)?{...e
 function setTab(t){ tab=t; render(); }
 function setProfTab(t){ profTab=t; render(); }
 function toggleDark(){ dark=!dark; document.body.classList.toggle("dark",dark); sv("dark2",dark); render(); }
-function addEntry(data){ entries=[...entries,{...data,id:Date.now(),slot:activeSlot}]; sv("ent_"+TODAY(),entries); render(); syncWithServer({}); }
+function addEntry(data){ entries=[...entries,{...data,id:Date.now(),slot:activeSlot}]; sv("ent_"+TODAY(),entries); render(); markDirty(); scheduleSync(); }
 function updProf(k,v){ profile={...profile,[k]:v,_profileTs:Date.now()}; sv("prof2",profile); render(); scheduleSync(); }
 
 function saveApiKey(){
@@ -1759,10 +1759,7 @@ async function syncWithServer(push={}, _retry=false){
   }
 }
 
-function scheduleSync(){
-  clearTimeout(syncTimeout);
-  syncTimeout = setTimeout(()=>syncWithServer({}), 3000);
-}
+// scheduleSync defined below with dirty tracking
 
 function saveSyncConfig(){
   const username = (document.getElementById("sync-username")||{}).value?.trim();
@@ -1890,6 +1887,8 @@ async function doSync(){
     sv("ent_" + today, entries);
 
     sv("last_sync_time", Date.now());
+    _dirty = false;
+    _lastSyncHash = _stateHash();
     render();
 
     // Explicitně nastav hodnoty profil inputů po syncu
@@ -2007,7 +2006,7 @@ async function debugProfile(){
   }
 }
 function syncWithServer(push={}, retry=false){ doSync(); }
-function scheduleSync(){ clearTimeout(syncTimeout); syncTimeout = setTimeout(doSync, 2000); }
+// scheduleSync defined below with dirty tracking
 
 // ── EAN Scanner ───────────────────────────────────────────────────────────────
 let _scanStream=null;
@@ -2094,11 +2093,48 @@ setTimeout(()=>{const s=document.getElementById("splash");if(s&&s.style.display!
 loadFoodDB().then(()=>{ render(); return syncWithServer({}); }).catch(err=>{console.error(err);render();});
 if(profile.notifEnabled) scheduleNotification();
 
-// Auto-sync každých 30 sekund
+// ── Auto-sync každých 30 sekund, jen pokud jsou změny ──────────────────────
+let _dirty = false; // true = jsou lokální změny které ještě nebyly odeslány
+let _lastSyncHash = ""; // hash posledního odeslaného stavu
+
+function _stateHash(){
+  // Rychlý otisk aktuálního stavu - porovnáme s posledním odeslaným
+  const e = entries.filter(e=>!e._del).length;
+  const p = (profile._profileTs||0) + "|" + (profile.vaha||0) + "|" + (profile.geminiKey||"").slice(0,8);
+  const h = Object.keys(hist).length;
+  const w = ls("weight_log",[]).length;
+  const a = ls("act_log",[]).length;
+  return e+"|"+p+"|"+h+"|"+w+"|"+a;
+}
+
+function markDirty(){
+  _dirty = true;
+}
+
+function scheduleSync(){
+  clearTimeout(syncTimeout);
+  markDirty();
+  syncTimeout = setTimeout(doSync, 2000);
+}
+
 setInterval(()=>{
   const username = (localStorage.getItem("_sync_username")||"").trim();
-  if(username) doSync();
+  if(!username) return;
+  const hash = _stateHash();
+  if(_dirty || hash !== _lastSyncHash){
+    _dirty = false;
+    _lastSyncHash = hash;
+    doSync();
+  }
+  // I bez změn jednou za 5 minut stáhneme ze serveru (jiné zařízení mohlo přidat data)
 }, 30000);
+
+// Každých 5 minut force-stáhni ze serveru (zachytí změny z druhého zařízení)
+setInterval(()=>{
+  const username = (localStorage.getItem("_sync_username")||"").trim();
+  if(!username) return;
+  doSync();
+}, 5 * 60 * 1000);
 
 // Force update service workeru při každém načtení
 if('serviceWorker' in navigator){
