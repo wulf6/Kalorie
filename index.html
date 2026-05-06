@@ -1070,7 +1070,8 @@ function render(){
 
     if(profTab==="vaha"){
       const weightLog = ls("weight_log", []).filter(e => !e._del);
-      const sortedW = [...weightLog].sort((a,b)=>a.d.localeCompare(b.d));
+      // Zobraz datum - použij displayD pokud existuje (nový formát), jinak d
+      const sortedW = [...weightLog].sort((a,b)=>a.d.localeCompare(b.d)).map(e=>({...e, _showD: e.displayD||e.d.slice(0,10)}));
       const lastW = sortedW[sortedW.length-1];
       const firstW = sortedW[0];
       const wDiff = (sortedW.length>1) ? (lastW.w - firstW.w).toFixed(1) : null;
@@ -1097,7 +1098,7 @@ function render(){
               const prev = arr[i+1];
               const diff = prev ? (e.w-prev.w).toFixed(1) : null;
               return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
-                <span style="color:var(--muted)">${e.d}</span>
+                <span style="color:var(--muted)">${e._showD||e.d.slice(0,10)}</span>
                 <span style="font-weight:700">${e.w} kg</span>
                 ${diff!==null?`<span style="font-size:12px;color:${parseFloat(diff)<0?"#16a34a":"#ef4444"}">${parseFloat(diff)>0?"+":""}${diff}</span>`:"<span></span>"}
                 <button onclick="deleteWeight('${e.d}')" style="background:transparent;border:none;color:#ef4444;cursor:pointer;padding:2px 6px;font-size:14px">×</button>
@@ -1613,7 +1614,7 @@ function showMacroDetail(label,type){
   modal.style.display="flex"; 
 }
 function closeMacroDetail(){ const m=document.getElementById("macro-detail-modal");if(m)m.style.display="none"; }
-function logWeight(){ const inp=document.getElementById("w-inp");if(!inp)return; const w=parseFloat(inp.value);if(isNaN(w)||w<20||w>300){setToast("Neplatná hodnota");return;} const log=ls("weight_log",[]);log.push({d:TODAY(),w,_t:Date.now()});sv("weight_log",log); profile={...profile,vaha:w,_profileTs:Date.now()}; sv("prof2",profile); setToast("✓ "+w+" kg uloženo"); markDirty(); scheduleSync(); render(); }
+function logWeight(){ const inp=document.getElementById("w-inp");if(!inp)return; const w=parseFloat(inp.value);if(isNaN(w)||w<20||w>300){setToast("Neplatná hodnota");return;} const now=Date.now(); const dateKey=TODAY()+"_"+now; const log=ls("weight_log",[]); log.push({d:dateKey,w,_t:now,displayD:TODAY()}); sv("weight_log",log); profile={...profile,vaha:w,_profileTs:now}; sv("prof2",profile); setToast("✓ "+w+" kg uloženo"); markDirty(); scheduleSync(); render(); }
 function deleteWeight(date){ const log=ls("weight_log",[]).map(e=>e.d===date?{...e,_del:true,_t:Date.now()}:e); sv("weight_log",log); markDirty(); scheduleSync(); render(); }
 function repeatEntry(id){ const orig=entries.find(e=>e.id===id);if(!orig)return; const{id:_,...copy}=orig;entries.push({...copy,id:Date.now()}); sv("ent_"+TODAY(),entries);render();setToast("✓ "+orig.jidlo+" přidáno"); }
 function repeatYesterday(idx){ const items=window._ydItems||[];const e=items[idx];if(!e)return; addEntry({...e,id:undefined});setToast("✓ "+e.jidlo+" přidáno znovu"); }
