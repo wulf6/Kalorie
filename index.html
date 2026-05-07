@@ -1185,12 +1185,26 @@ function entryHTML(e){ if(e._del) return "";
           <button onclick="applyGram(${e.id})" style="padding:8px 14px;background:#6366f1;border:none;border-radius:8px;color:#fff;font-weight:700;cursor:pointer;font-size:13px">OK</button>
         </div>
       </div>
+      <div style="margin-bottom:8px">
+        <div style="font-size:11px;color:var(--muted);font-weight:600;margin-bottom:4px">PŘESUNOUT DO</div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap">
+          ${SLOTS.map(s=>`<button onclick="moveEntry(${e.id},'${s}')" style="padding:5px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1px solid ${s===e.slot?'#6366f1':'var(--border)'};background:${s===e.slot?'#eff6ff':'var(--surface)'};color:${s===e.slot?'#6366f1':'var(--muted)'};font-weight:${s===e.slot?700:400}">${s}</button>`).join("")}
+        </div>
+      </div>
       <div style="display:flex;gap:8px">
         <button onclick="repeatEntry(${e.id})" style="flex:1;padding:8px;background:transparent;border:1px solid #bbf7d0;border-radius:8px;color:#16a34a;font-size:13px;cursor:pointer">🔁 Přidat znovu</button>
         <button onclick="removeEntry(${e.id})" style="flex:1;padding:8px;background:transparent;border:1px solid #fca5a5;border-radius:8px;color:#ef4444;font-size:13px;cursor:pointer">🗑 Odebrat</button>
       </div>
     </div>`:""}
   </div>`;
+}
+
+function moveEntry(id, newSlot){
+  entries = entries.map(e => String(e.id)===String(id) ? {...e, slot:newSlot, _t:Date.now()} : e);
+  sv("ent_"+TODAY(), entries);
+  render();
+  scheduleSync();
+  setToast("✓ Přesunuto do: " + newSlot);
 }
 
 function applyGram(id){
