@@ -1,5 +1,8 @@
 import json
 import os
+import base64
+import urllib.request
+import urllib.error
 from datetime import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,47 +18,138 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── In-memory store ──────────────────────────────────────────────────────────
-# Struktura: STORE[username] = { profile, entries, history, receptar, aktivity, weight_log }
-STORE: dict = {}
+# ── Konfigurace ───────────────────────────────────────────────────────────────
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+GITHUB_REPO = "wulf6/Kalorie"
+GITHUB_FILE = "data.json"
+GITHUB_BRANCH = "main"
 BACKUP_PATH = "/tmp/kalorie_backup.json"
 
-def load_backup():
-    """Načti backup ze souboru při startu (pokud existuje)."""
+# ── In-memory store ───────────────────────────────────────────────────────────
+STORE: dict = {}
+
+def github_get_file():
+    """Stáhni data.json z GitHubu."""
+    if not GITHUB_TOKEN:
+        return None, None
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE}"
+    req = urllib.request.Request(url, headers={
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "kalorie-backend"
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            content = base64.b64decode(data["content"]).decode("utf-8")
+            return json.loads(content), data["sha"]
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return {}, None  # soubor neexistuje
+        print(f"GitHub GET error: {e}")
+        return None, None
+    except Exception as e:
+        print(f"GitHub GET error: {e}")
+        return None, None
+
+def github_save_file(data: dict, sha: Optional[str] = None):
+    """Ulož data.json na GitHub."""
+    if not GITHUB_TOKEN:
+        return False
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE}"
+    content = base64.b64encode(json.dumps(data, ensure_ascii=False).encode()).decode()
+    body = {
+        "message": f"sync {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}",
+        "content": content,
+        "branch": GITHUB_BRANCH,
+    }
+    if sha:
+        body["sha"] = sha
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode(),
+        headers={
+            "Authorization": f"token {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github.v3+json",
+            "Content-Type": "application/json",
+            "User-Agent": "kalorie-backend"
+        },
+        method="PUT"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read())
+            return result.get("content", {}).get("sha")
+    except Exception as e:
+        print(f"GitHub PUT error: {e}")
+        return False
+
+def load_data():
+    """Načti data - nejdřív z GitHubu, pak z /tmp backup."""
     global STORE
+    # Zkus GitHub
+    gh_data, sha = github_get_file()
+    if gh_data is not None:
+        STORE = gh_data
+        print(f"Data načtena z GitHubu: {len(STORE)} uživatelů")
+        # Ulož lokální backup
+        try:
+            with open(BACKUP_PATH, "w") as f:
+                json.dump({"store": STORE, "sha": sha}, f)
+        except:
+            pass
+        return sha
+    # Fallback na /tmp
     try:
         if os.path.exists(BACKUP_PATH):
             with open(BACKUP_PATH, "r") as f:
-                STORE = json.load(f)
-            print(f"Backup načten: {len(STORE)} uživatelů")
+                backup = json.load(f)
+                STORE = backup.get("store", {})
+                print(f"Data načtena z /tmp: {len(STORE)} uživatelů")
+                return backup.get("sha")
     except Exception as e:
-        print(f"Backup nelze načíst: {e}")
-        STORE = {}
+        print(f"Backup error: {e}")
+    STORE = {}
+    return None
 
-def save_backup():
-    """Ulož aktuální stav na disk (best-effort)."""
-    try:
-        with open(BACKUP_PATH, "w") as f:
-            json.dump(STORE, f)
-    except Exception as e:
-        print(f"Backup nelze uložit: {e}")
+# SHA posledního uloženého souboru na GitHubu
+_github_sha = load_data()
+
+def save_data():
+    """Ulož data na GitHub a do /tmp."""
+    global _github_sha
+    new_sha = github_save_file(STORE, _github_sha)
+    if new_sha:
+        _github_sha = new_sha
+        # Aktualizuj /tmp backup
+        try:
+            with open(BACKUP_PATH, "w") as f:
+                json.dump({"store": STORE, "sha": _github_sha}, f)
+        except:
+            pass
+        return True
+    else:
+        # GitHub selhal - ulož aspoň do /tmp
+        try:
+            with open(BACKUP_PATH, "w") as f:
+                json.dump({"store": STORE, "sha": _github_sha}, f)
+        except:
+            pass
+        return False
 
 def empty_user():
     return {
         "profile": {},
         "entries": {},
         "history": {},
-        "receptar": {},   # dict name -> item
-        "aktivity": {},   # dict act_id -> item
-        "weight_log": {}, # dict date -> item
+        "receptar": {},
+        "aktivity": {},
+        "weight_log": {},
     }
 
-load_backup()
-
-# ── Merge helpers ────────────────────────────────────────────────────────────
+# ── Merge helpers ─────────────────────────────────────────────────────────────
 
 def merge_entries(server: dict, incoming: list) -> dict:
-    """Merge jídla podle id a _t timestampu."""
     result = dict(server)
     for item in incoming:
         key = str(item.get("id", ""))
@@ -69,26 +163,19 @@ def merge_entries(server: dict, incoming: list) -> dict:
     return result
 
 def merge_profile(server: dict, incoming: dict) -> dict:
-    """Profil merge - vyhraje novější _profileTs, Gemini klíč podle geminiKeyTs."""
     if not server:
         return incoming
     if not incoming:
         return server
-
     server_ts = server.get("_profileTs") or 0
     incoming_ts = incoming.get("_profileTs") or 0
-
-    # Vyber základní profil podle _profileTs
     base = incoming if incoming_ts >= server_ts else server
-
-    # Gemini klíč - vyhraje novější geminiKeyTs
     old_key_ts = server.get("geminiKeyTs") or 0
     new_key_ts = incoming.get("geminiKeyTs") or 0
     if old_key_ts > new_key_ts:
         base = dict(base)
         base["geminiKey"] = server.get("geminiKey", "")
         base["geminiKeyTs"] = old_key_ts
-
     return base
 
 # ── API ───────────────────────────────────────────────────────────────────────
@@ -109,7 +196,6 @@ def home():
 
 @app.post("/sync")
 def sync(body: SyncBody):
-    # Urči klíč uživatele
     if body.username and body.username.strip():
         uid = "user_" + body.username.lower().strip()
     else:
@@ -120,30 +206,25 @@ def sync(body: SyncBody):
 
     user = STORE[uid]
 
-    # ── Profil ──
     if body.profile:
         user["profile"] = merge_profile(user.get("profile", {}), body.profile)
 
-    # ── Entries (jídla) ──
     if body.entries:
         for date, incoming_list in body.entries.items():
             server_dict = user["entries"].get(date, {})
             user["entries"][date] = merge_entries(server_dict, incoming_list)
 
-    # ── Historie ──
     if body.history:
         for date, items in body.history.items():
             if date not in user["history"]:
-                user["history"][date] = items  # starší dny nepřepisuj
+                user["history"][date] = items
 
-    # ── Receptář ──
     if body.receptar is not None:
         for recept in body.receptar:
             name = recept.get("jidlo", "")
             if name:
                 user["receptar"][name] = recept
 
-    # ── Aktivity ──
     if body.aktivity is not None:
         for act in body.aktivity:
             act_id = str(act.get("id", ""))
@@ -155,25 +236,20 @@ def sync(body: SyncBody):
                 if (act.get("_t") or 0) > (user["aktivity"][act_id].get("_t") or 0):
                     user["aktivity"][act_id] = act
 
-    # ── Weight log - merge s soft-delete podporou ──
     if body.weight_log is not None:
         for entry in body.weight_log:
             date = entry.get("d", "")
             if not date:
                 continue
             if date not in user["weight_log"]:
-                user["weight_log"][date] = entry  # nový záznam
+                user["weight_log"][date] = entry
             else:
-                server_t = user["weight_log"][date].get("_t") or 0
-                incoming_t = entry.get("_t") or 0
-                if incoming_t >= server_t:
-                    # Příchozí je novější nebo stejný - přijmi (včetně _del flagu)
+                if (entry.get("_t") or 0) >= (user["weight_log"][date].get("_t") or 0):
                     user["weight_log"][date] = entry
 
-    # Ulož backup
-    save_backup()
+    # Ulož na GitHub
+    save_data()
 
-    # ── Vrať kompletní stav ──
     return _user_response(user, uid)
 
 @app.get("/data/{uid}")
@@ -183,12 +259,9 @@ def get_data(uid: str):
     return _user_response(STORE[uid], uid)
 
 def _user_response(user: dict, uid: str) -> dict:
-    """Převeď interní formát na response - entries jako list, weight_log jako list atd."""
-    # Entries: dict of date -> dict of id->item  =>  dict of date -> list
     entries_out = {}
     for date, items_dict in user.get("entries", {}).items():
         entries_out[date] = list(items_dict.values())
-
     return {
         "ok": True,
         "did": uid,
@@ -197,5 +270,5 @@ def _user_response(user: dict, uid: str) -> dict:
         "history": user.get("history", {}),
         "receptar": list(user.get("receptar", {}).values()),
         "aktivity": list(user.get("aktivity", {}).values()),
-        "weight_log": sorted(user.get("weight_log", {}).values(), key=lambda x: x.get("d", "")),  # včetně _del
+        "weight_log": sorted(user.get("weight_log", {}).values(), key=lambda x: x.get("d", "")),
     }
